@@ -7,8 +7,8 @@
 #   RELEASE_DIR  where the stamped Coastty.app is written (default: zig-out/release)
 #   ZIG          the zig binary to build with (default: zig on PATH)
 #
-# The build number is YYYYMMDD.N and must only ever increase, so the last release's is kept in
-# dist/macos/last-build-number. Commit that file with the release.
+# The build number is YYYYMMDD.N and must only ever increase, so the last release's is kept in dist/macos/last-build-number.
+# Commit that file with the release.
 set -euo pipefail
 
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
@@ -75,11 +75,13 @@ build_number() {
   fi
 
   last=$(tr -d '[:space:]' <"$last_build_file")
+
   if [[ ! $last =~ ^[0-9]{8}\.[0-9]+$ ]]; then
     fail "$last_build_file holds '$last', not a YYYYMMDD.N build number"
   fi
 
   build=$(next_build_number "$last" "$today")
+
   if ! is_higher "$build" "$last"; then
     fail "build $build would not be higher than the last release's $last"
   fi
@@ -87,6 +89,7 @@ build_number() {
   echo "$build"
 }
 
+# Builds, stamps and re-signs the release for the tag on HEAD.
 main() {
   local tag version file_version build app plist
 
@@ -94,6 +97,7 @@ main() {
   tag=$(release_tag)
   version=${tag#v}
   file_version=$(tr -d '[:space:]' <"$repo/VERSION")
+
   if [[ $version != "$file_version" ]]; then
     fail "tag $tag does not match VERSION ($file_version)"
   fi

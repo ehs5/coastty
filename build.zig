@@ -21,9 +21,8 @@ pub fn build(b: *std.Build) !void {
     // want to know what options are available, you can run `--help` or
     // you can read `src/build/Config.zig`.
 
-    // VERSION holds coastty's own version. build.zig.zon's version stays
-    // Ghostty's, which programs in a pane see through TERM_PROGRAM_VERSION
-    // and XTVERSION to detect Ghostty features.
+    // VERSION holds coastty's own version.
+    // build.zig.zon's version stays Ghostty's, which programs in a pane see through TERM_PROGRAM_VERSION and XTVERSION to detect Ghostty features.
     const coastty_version: []const u8 = std.mem.trim(
         u8,
         try b.build_root.handle.readFileAlloc(
