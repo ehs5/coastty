@@ -64,8 +64,8 @@ sudo xcode-select --switch /Applications/Xcode.app
 
 ## AI and Agents
 
-If you're using AI assistance with Ghostty, Ghostty provides an
-[AGENTS.md file](https://github.com/ghostty-org/ghostty/blob/main/AGENTS.md)
+If you're using AI assistance with coastty, coastty provides an
+[AGENTS.md file](AGENTS.md)
 read by most of the popular AI agents to help produce higher quality
 results.
 
@@ -81,7 +81,7 @@ produced.
 
 > [!WARNING]
 >
-> All AI assistance usage [must be disclosed](https://github.com/ghostty-org/ghostty/blob/main/CONTRIBUTING.md#ai-assistance-notice)
+> All AI assistance usage [must be disclosed](CONTRIBUTING.md#working-with-ai)
 > and we expect contributors to understand the code that is produced and
 > be able to answer questions about it. If you don't understand the
 > code produced, feel free to disclose that, but if it has problems, we

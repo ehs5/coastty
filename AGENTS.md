@@ -53,6 +53,8 @@ coastty is a macOS-only fork of Ghostty. The following, inherited from upstream
 Ghostty, are not coastty's own implementation and get no attention here
 beyond whatever keeps them compiling. Don't spend any time looking these folders unless explicitly told to do so.
 
+They stay in the tree so upstream Ghostty merges cleanly: files coastty never touches merge without effort, while deleting them would turn every upstream change to them into a conflict. Don't delete or restructure them, and keep coastty's own platform-specific code behind a seam so a Linux frontend stays possible.
+
 - **GTK app (Linux/FreeBSD)**: `src/apprt/gtk/`, `src/apprt/gtk.zig`
 - **Browser/WASM runtime**: `src/apprt/browser.zig`
 - **iOS app**: the `Ghostty-iOS` Xcode target and `macos/Sources/App/iOS/`
