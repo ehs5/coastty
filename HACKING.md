@@ -88,6 +88,21 @@ produced.
 > may ask you to fix it and close the issue. It isn't a maintainers job to
 > review a PR so broken that it requires significant rework to be acceptable.
 
+## Releasing
+
+`dist/macos/release.sh` builds every release the same way. It needs Zig 0.16, Xcode, Node.js 20 or newer for `npx`, and for publishing an authenticated `gh`.
+
+1. Set `VERSION` to the new version and write the release notes in `dist/macos/release-notes/v<version>.md`.
+2. Commit both and push the commit.
+3. Tag the commit locally: `git tag v<version>`.
+4. Run `dist/macos/release.sh` to check the build locally. It builds with `-Doptimize=ReleaseFast`, stamps the version and build number into `Info.plist`, copies `LICENSE` and herdr's licence into the app's resources, re-signs the app ad hoc and wraps it in `zig-out/release/Coastty.dmg` with [create-dmg](https://github.com/sindresorhus/create-dmg) through `npx`. It prints the DMG's SHA-256 and the values for `Casks/coastty.rb`, and uploads nothing.
+5. Run `dist/macos/release.sh --publish` to build again and upload `Coastty.dmg` to a draft GitHub release for the tag, with the release notes as its text. Review the draft on GitHub and publish it there; GitHub creates the tag when you do.
+6. Put the printed `version` and `sha256` into `Casks/coastty.rb`, and commit it together with `dist/macos/last-build-number`, which `--publish` updates.
+
+The script refuses to run on a working tree with uncommitted changes, without exactly one `vX.Y.Z` tag on `HEAD`, when the tag does not match `VERSION`, or when the tag or a release for it already exists on GitHub. `RELEASE_DIR` changes where the app and DMG go, and `ZIG` picks the zig binary.
+
+Until coastty has an Apple Developer ID the app is signed ad hoc and the DMG not at all, so users must approve the first launch in System Settings; the README describes the steps.
+
 ## Logging
 
 Ghostty can write logs to a number of destinations. On all platforms, logging to

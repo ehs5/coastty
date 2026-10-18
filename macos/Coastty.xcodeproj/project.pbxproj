@@ -123,6 +123,8 @@
 				Features/About/About.xib,
 				Features/About/AboutController.swift,
 				Features/About/AboutView.swift,
+				Features/About/LicensesController.swift,
+				Features/About/LicensesView.swift,
 				"Features/App Intents/CloseTerminalIntent.swift",
 				"Features/App Intents/CommandPaletteIntent.swift",
 				"Features/App Intents/Entities/CommandEntity.swift",
