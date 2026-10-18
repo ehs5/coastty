@@ -41,6 +41,14 @@ extension Ghostty.Action {
         }
     }
 
+    struct MoveSpace {
+        let amount: Int
+
+        init(c: ghostty_action_move_space_s) {
+            self.amount = c.amount
+        }
+    }
+
     struct OpenURL {
         enum Kind {
             case unknown
@@ -105,6 +113,62 @@ extension Ghostty.Action {
 
         let state: State
         let progress: UInt8?
+    }
+
+    /// coastty-specific: not part of upstream Ghostty's own action
+    /// vocabulary — the agent-detection feature this decodes is a port of
+    /// herdr, grafted onto the same `ghostty_action_*` C dispatch every
+    /// other action here already uses.
+    struct CoasttyAgentStateChange {
+        enum State {
+            case idle
+            case working
+            case blocked
+            case unknown
+
+            init(_ c: ghostty_agent_state_e) {
+                switch c {
+                case GHOSTTY_AGENT_STATE_IDLE:
+                    self = .idle
+                case GHOSTTY_AGENT_STATE_WORKING:
+                    self = .working
+                case GHOSTTY_AGENT_STATE_BLOCKED:
+                    self = .blocked
+                default:
+                    self = .unknown
+                }
+            }
+        }
+
+        /// Which agent the process probe found in this pane, independent of
+        /// `state`. A pane can hold a known agent whose state is still
+        /// `.unknown` for the whole startup grace window, so agent presence
+        /// must never be inferred from `state` alone.
+        enum Agent {
+            case claude
+
+            init?(c: ghostty_agent_e, present: Bool) {
+                guard present else { return nil }
+                switch c {
+                case GHOSTTY_AGENT_CLAUDE:
+                    self = .claude
+                default:
+                    return nil
+                }
+            }
+
+            var displayName: String {
+                switch self {
+                case .claude: return "Claude"
+                }
+            }
+        }
+
+        let state: State
+        let agent: Agent?
+
+        /// The daemon's attention state for a pane it owns, with seen already folded in; nil for a local pane.
+        let hostAttention: CoasttyAgentStatus?
     }
 
     struct Scrollbar {
@@ -172,5 +236,26 @@ extension Ghostty.Action.ProgressReport {
     init(c: ghostty_action_progress_report_s) {
         self.state = State(c.state)
         self.progress = c.progress >= 0 ? UInt8(c.progress) : nil
+    }
+}
+
+extension Ghostty.Action.CoasttyAgentStateChange {
+    init(c: ghostty_action_agent_state_change_s) {
+        self.state = State(c.state)
+        self.agent = Agent(c: c.agent, present: c.has_agent)
+        self.hostAttention = c.has_host ? CoasttyAgentStatus(c.host_attention) : nil
+    }
+}
+
+extension CoasttyAgentStatus {
+    /// Decodes `agent_detection.AgentStatus` as it crosses the C API.
+    init(_ c: ghostty_agent_status_e) {
+        switch c {
+        case GHOSTTY_AGENT_STATUS_IDLE: self = .idle
+        case GHOSTTY_AGENT_STATUS_WORKING: self = .working
+        case GHOSTTY_AGENT_STATUS_BLOCKED: self = .blocked
+        case GHOSTTY_AGENT_STATUS_DONE: self = .done
+        default: self = .unknown
+        }
     }
 }

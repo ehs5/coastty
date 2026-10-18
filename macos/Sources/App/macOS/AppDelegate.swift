@@ -27,6 +27,7 @@ class AppDelegate: NSObject,
     @IBOutlet private var menuQuit: NSMenuItem?
 
     @IBOutlet private var menuNewWindow: NSMenuItem?
+    @IBOutlet private var menuNewSpace: NSMenuItem?
     @IBOutlet private var menuNewTab: NSMenuItem?
     @IBOutlet private var menuSplitRight: NSMenuItem?
     @IBOutlet private var menuSplitLeft: NSMenuItem?
@@ -34,6 +35,7 @@ class AppDelegate: NSObject,
     @IBOutlet private var menuSplitUp: NSMenuItem?
     @IBOutlet private var menuClose: NSMenuItem?
     @IBOutlet private var menuCloseTab: NSMenuItem?
+    @IBOutlet private var menuCloseSpace: NSMenuItem?
     @IBOutlet private var menuCloseWindow: NSMenuItem?
     @IBOutlet private var menuCloseAllWindows: NSMenuItem?
 
@@ -165,7 +167,7 @@ class AppDelegate: NSObject,
 
     override init() {
 #if DEBUG
-        ghostty = Ghostty.App(configPath: ProcessInfo.processInfo.environment["GHOSTTY_CONFIG_PATH"])
+        ghostty = Ghostty.App(configPath: ProcessInfo.processInfo.environment["COASTTY_CONFIG_PATH"])
 #else
         ghostty = Ghostty.App()
 #endif
@@ -212,6 +214,9 @@ class AppDelegate: NSObject,
         // Store our start time
         applicationLaunchTime = ProcessInfo.processInfo.systemUptime
 
+        // Set before the daemon is first contacted, since that starts the subscription layout command requests arrive on.
+        Self.coasttyInstallLayoutRequestHandler()
+
         // Check if secure input was enabled when we last quit.
         if UserDefaults.ghostty.bool(forKey: "SecureInput") != SecureInput.shared.enabled {
             toggleSecureInput(self)
@@ -220,8 +225,8 @@ class AppDelegate: NSObject,
         // Initial config loading
         ghosttyConfigDidChange(config: ghostty.config)
 
-        // Start our update checker.
-        updateController.startUpdater()
+        // coastty publishes no update feed yet, and Ghostty's would offer Ghostty's own build in coastty's place - so the updater never starts and its menu item is hidden.
+        menuCheckForUpdates?.isHidden = true
 
         // Register our service provider. This must happen after everything is initialized.
         NSApp.servicesProvider = ServiceProvider()
@@ -275,6 +280,11 @@ class AppDelegate: NSObject,
             self,
             selector: #selector(ghosttyNewTab(_:)),
             name: Ghostty.Notification.ghosttyNewTab,
+            object: nil)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(ghosttyNewSpace(_:)),
+            name: Ghostty.Notification.ghosttyNewSpace,
             object: nil)
 
         // Configure user notifications
@@ -360,8 +370,16 @@ class AppDelegate: NSObject,
             //   - if we're restoring from persisted state
             if TerminalController.all.isEmpty && derivedConfig.initialWindow {
                 undoManager.disableUndoRegistration()
-                _ = TerminalController.newWindow(ghostty)
-                undoManager.enableUndoRegistration()
+                // Keep undo registration disabled until every restored window (not just the first) finishes loading.
+                let isRestoring = coasttyRestoreSessionIfAvailable { [weak self] in
+                    self?.undoManager.enableUndoRegistration()
+                    Self.coasttySweepUnclaimedHostPanes()
+                    TerminalController.coasttySeedHostModel()
+                }
+                if !isRestoring {
+                    _ = TerminalController.newWindow(ghostty)
+                    undoManager.enableUndoRegistration()
+                }
             }
         }
     }
@@ -409,6 +427,9 @@ class AppDelegate: NSObject,
         // so remove them all now. In the future we may want to be
         // more selective and only remove surface-targeted notifications.
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+
+        // Flush now rather than waiting on the debounce timer.
+        CoasttySessionSaveScheduler.shared.flushNow()
     }
 
     /// This is called when the application is already open and someone double-clicks the icon
@@ -483,7 +504,7 @@ class AppDelegate: NSObject,
             // may want to show this as a sheet on the focused window (especially if we're
             // opening a tab). I'm not sure.
             let alert = NSAlert()
-            alert.messageText = "Allow Ghostty to execute \"\(filename)\"?"
+            alert.messageText = "Allow Coastty to execute \"\(filename)\"?"
             alert.addButton(withTitle: "Allow")
             alert.addButton(withTitle: "Cancel")
             alert.alertStyle = .warning
@@ -710,8 +731,106 @@ class AppDelegate: NSObject,
         _ = TerminalController.newWindow(ghostty, withBaseConfig: config)
     }
 
+    /// Hands coastty-host the panes this launch reattached to so it can end what a previous run left behind, once after the whole restore batch - not again on every later new window.
+    private static func coasttySweepUnclaimedHostPanes() {
+        let claimed = TerminalController.claimedHostPaneIDs()
+        // Claiming nothing is what persistence-off or nothing-attached looks like, and sweeping on that would kill every pane the daemon holds.
+        guard !claimed.isEmpty else { return }
+        CoasttyPaneLifecycle.sweep(keeping: claimed)
+    }
+
+
+    /// Restores every window, returning false (and never calling `onComplete`) if there's nothing to restore.
+    ///
+    /// What exists comes from the daemon; what each window makes of it comes from this app's own layout file. A daemon that does not answer at all falls back to the session file this build used to keep, rather than treating the absence as an empty session.
+    private func coasttyRestoreSessionIfAvailable(onComplete: @escaping () -> Void) -> Bool {
+        guard let model = coasttyHostModelForLaunch() else {
+            return coasttyRestoreFromLegacySession(onComplete: onComplete)
+        }
+
+        // Anything the model holds that holds nothing is a leftover, not a
+        // session; ending it here is what keeps it from coming back every launch.
+        let pruned = CoasttySessionRestore.pruningEmpties(model)
+        CoasttyModelSync.send(pruned.operations)
+
+        let windows = CoasttySessionRestore.windows(
+            spaces: pruned.spaces,
+            layouts: CoasttySessionPersistence.loadLayouts(),
+            app: ghostty.app!)
+        guard let first = windows.first else { return false }
+
+        coasttyRestoreWindows(first: first, rest: Array(windows.dropFirst()), onComplete: onComplete)
+        return true
+    }
+
+    /// Hands each layout command request the daemon sends to the window it is for, on the main thread.
+    private static func coasttyInstallLayoutRequestHandler() {
+        ghostty_host_set_request_handler { json, length in
+            guard let json else { return }
+            let data = Data(bytes: json, count: length)
+            guard let request = CoasttyLayoutRequest.decode(data) else { return }
+            DispatchQueue.main.async {
+                TerminalController.coasttyCarryOut(request)
+            }
+        }
+    }
+
+    /// The model this launch builds from, seeding the daemon from the session file this build used to keep when the daemon has nothing - which is what an upgrade looks like, and losing someone's Spaces to it is the one unacceptable outcome.
+    private func coasttyHostModelForLaunch() -> CoasttyHostModel? {
+        guard let model = CoasttyHostModel.fetch() else { return nil }
+        guard model.isEmpty else { return model }
+
+        guard let snapshot = CoasttySessionPersistence.load(), !snapshot.windows.isEmpty else { return model }
+        // Blocking, unlike every other report: the model is read back on the very
+        // next line, and an upgrade that raced it would build an empty window and
+        // silently drop the Spaces this file is the only remaining record of.
+        for window in snapshot.windows {
+            CoasttyModelSync.sendBlocking(CoasttyModelSync.Operation.operationsRecreating(window.spaces))
+        }
+
+        return CoasttyHostModel.fetch() ?? model
+    }
+
+    /// The pre-daemon restore path, for a launch where no daemon answered.
+    private func coasttyRestoreFromLegacySession(onComplete: @escaping () -> Void) -> Bool {
+        guard let snapshot = CoasttySessionPersistence.load(), let first = snapshot.windows.first else { return false }
+        coasttyRestoreWindows(first: first, rest: Array(snapshot.windows.dropFirst()), onComplete: onComplete)
+        return true
+    }
+
+    /// One window per runloop turn - creating them back-to-back silently
+    /// dropped the second window in testing (same class of timing issue
+    /// `TerminalController.newWindow`'s `scheduleInitialPresentation` works
+    /// around). Calls `onComplete` once `first` and every window in `rest`
+    /// has been created.
+    private func coasttyRestoreWindows(
+        first: TerminalController.UndoState,
+        rest: [TerminalController.UndoState],
+        onComplete: @escaping () -> Void
+    ) {
+        _ = TerminalController(ghostty, with: first)
+
+        guard let next = rest.first else {
+            onComplete()
+            return
+        }
+        let remainingRest = Array(rest.dropFirst())
+        DispatchQueue.main.async { [weak self] in
+            self?.coasttyRestoreWindows(first: next, rest: remainingRest, onComplete: onComplete)
+        }
+    }
+
+    /// Only the no-focused-surface case; `TerminalController` handles a real surface target.
+    @objc private func ghosttyNewSpace(_ notification: Notification) {
+        guard notification.object == nil else { return }
+        _ = TerminalController.newWindow(ghostty)
+    }
+
     @objc private func ghosttyNewTab(_ notification: Notification) {
-        guard let surfaceView = notification.object as? Ghostty.SurfaceView else { return }
+        guard let surfaceView = notification.object as? Ghostty.SurfaceView else {
+            _ = TerminalController.newWindow(ghostty)
+            return
+        }
         guard let window = surfaceView.window else { return }
 
         // We only want to listen to new tabs if the focused parent is
@@ -930,20 +1049,30 @@ class AppDelegate: NSObject,
         ghostty.reloadConfig()
     }
 
-    @IBAction func checkForUpdates(_ sender: Any?) {
-        updateController.checkForUpdates()
-        // UpdateSimulator.happyPath.simulate(with: updateViewModel)
-    }
+    /// Does nothing: coastty has no update feed yet (see `applicationDidFinishLaunching`). Kept because the keybinding action and the update UI still route here.
+    @IBAction func checkForUpdates(_ sender: Any?) {}
 
     @IBAction func newWindow(_ sender: Any?) {
         _ = TerminalController.newWindow(ghostty)
     }
 
     @IBAction func newTab(_ sender: Any?) {
+        guard !TerminalController.all.isEmpty else {
+            _ = TerminalController.newWindow(ghostty)
+            return
+        }
         _ = TerminalController.newTab(
             ghostty,
             from: TerminalController.preferredParent?.window
         )
+    }
+
+    @IBAction func newSpace(_ sender: Any?) {
+        guard let parent = TerminalController.preferredParent else {
+            _ = TerminalController.newWindow(ghostty)
+            return
+        }
+        _ = parent.coasttyNewSpace()
     }
 
     @IBAction func closeAllWindows(_ sender: Any?) {
@@ -955,8 +1084,9 @@ class AppDelegate: NSObject,
         AboutController.shared.show()
     }
 
+    /// Opens coastty's README, which links on to Ghostty's docs for configuration.
     @IBAction func showHelp(_ sender: Any) {
-        guard let url = URL(string: "https://ghostty.org/docs") else { return }
+        guard let url = URL(string: "https://github.com/ehs5/coastty#readme") else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -1091,6 +1221,8 @@ extension AppDelegate {
         self.menuReloadConfig?.setImageIfDesired(systemSymbolName: "arrow.trianglehead.2.clockwise.rotate.90")
         self.menuSecureInput?.setImageIfDesired(systemSymbolName: "lock.display")
         self.menuNewWindow?.setImageIfDesired(systemSymbolName: "macwindow.badge.plus")
+        self.menuNewSpace?.setImageIfDesired(systemSymbolName: "folder.badge.plus")
+        self.menuCloseSpace?.setImageIfDesired(systemSymbolName: "folder.badge.minus")
         self.menuNewTab?.setImageIfDesired(systemSymbolName: "macwindow")
         self.menuSplitRight?.setImageIfDesired(systemSymbolName: "rectangle.righthalf.inset.filled")
         self.menuSplitLeft?.setImageIfDesired(systemSymbolName: "rectangle.leadinghalf.inset.filled")
@@ -1137,9 +1269,11 @@ extension AppDelegate {
         syncMenuShortcut(config, action: "quit", menuItem: self.menuQuit)
 
         syncMenuShortcut(config, action: "new_window", menuItem: self.menuNewWindow)
+        syncMenuShortcut(config, action: "new_space", menuItem: self.menuNewSpace)
         syncMenuShortcut(config, action: "new_tab", menuItem: self.menuNewTab)
         syncMenuShortcut(config, action: "close_surface", menuItem: self.menuClose)
         syncMenuShortcut(config, action: "close_tab", menuItem: self.menuCloseTab)
+        syncMenuShortcut(config, action: "close_space", menuItem: self.menuCloseSpace)
         syncMenuShortcut(config, action: "close_window", menuItem: self.menuCloseWindow)
         syncMenuShortcut(config, action: "close_all_windows", menuItem: self.menuCloseAllWindows)
         syncMenuShortcut(config, action: "new_split:right", menuItem: self.menuSplitRight)
@@ -1219,6 +1353,13 @@ extension AppDelegate {
         self.menuFloatOnTop?.state = window.level == .floating ? .on : .off
     }
 
+    /// Puts coastty's sidebar back to its default width in every window.
+    /// The width is a single shared value rather than per-window, so this
+    /// needs no key-window lookup.
+    @IBAction func coasttyResetSidebarWidth(_ sender: Any?) {
+        CoasttySidebarWidthStore.shared.resetToDefault()
+    }
+
     @IBAction func floatOnTop(_ menuItem: NSMenuItem) {
         menuItem.state = menuItem.state == .on ? .off : .on
         guard let window = NSApp.keyWindow else { return }
@@ -1233,6 +1374,14 @@ extension AppDelegate {
         } else {
             ud.removeObject(forKey: key)
         }
+    }
+
+    @IBAction func installCommandInPath(_ sender: NSMenuItem) {
+        Task { await CoasttyCommandLink.install() }
+    }
+
+    @IBAction func uninstallCommandFromPath(_ sender: NSMenuItem) {
+        Task { await CoasttyCommandLink.uninstall() }
     }
 
     @IBAction func setAsDefaultTerminal(_ sender: NSMenuItem) {
@@ -1295,7 +1444,7 @@ extension AppDelegate {
     func terminate() -> NSApplication.TerminateReply {
         let controllersNeedConfirmation = NSApplication.shared.windows
             .compactMap { $0.windowController as? BaseTerminalController }
-            .filter { !$0.windowCanBeClosedWithoutConfirmation() }
+            .filter(\.needsConfirmAppQuit)
 
         guard !controllersNeedConfirmation.isEmpty else {
             return .terminateNow
@@ -1304,7 +1453,7 @@ extension AppDelegate {
         if controllersNeedConfirmation.count == 1 {
             Task {
                 let response = await controllersNeedConfirmation[0].confirmCloseAsync(
-                    messageText: "Quit Ghostty?",
+                    messageText: "Quit Coastty?",
                     informativeText: "The terminal still has a running process. If you quit, the process will be killed.",
                     confirmButtonTitle: "Terminate",
                 )
@@ -1342,7 +1491,7 @@ extension AppDelegate {
         Task {
             for controller in controllers {
                 let response = await controller.confirmCloseAsync(
-                    messageText: "Quit Ghostty?",
+                    messageText: "Quit Coastty?",
                     informativeText: "The terminal still has a running process. If you quit, the process will be killed.",
                     confirmButtonTitle: "Terminate",
                 )

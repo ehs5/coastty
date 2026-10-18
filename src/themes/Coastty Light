@@ -1,0 +1,27 @@
+# coastty's light theme: the colours of the coastty website's light app
+# window. Like the dark one, the slots the sidebar reads hold the design's
+# state colours: bright yellow is working, bright cyan is done, bright red
+# is blocked and green is idle. Select it with `theme = Coastty Light`, or
+# follow the system with `theme = light:Coastty Light,dark:Coastty`.
+palette = 0=#2d3033
+palette = 1=#a85a52
+palette = 2=#5e7a6e
+palette = 3=#8f6f2c
+palette = 4=#5e7fa0
+palette = 5=#a675a1
+palette = 6=#37706b
+palette = 7=#d6d0c6
+palette = 8=#8a8984
+palette = 9=#b05a52
+palette = 10=#4f7a6a
+palette = 11=#a8812f
+palette = 12=#52739a
+palette = 13=#b88fb4
+palette = 14=#3f7d78
+palette = 15=#eae4d9
+background = #f7f2e9
+foreground = #2f3336
+cursor-color = #8f6f2c
+cursor-text = #f7f2e9
+selection-background = #ddd6ca
+selection-foreground = #2f3336

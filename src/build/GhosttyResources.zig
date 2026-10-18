@@ -125,6 +125,25 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
         try steps.append(b.allocator, &install_step.step);
     }
 
+    // Skill file teaching agents the layout commands, printed and installed by `coastty skill`
+    {
+        const install_step = b.addInstallFile(
+            b.path("src/skills/coastty/SKILL.md"),
+            "share/ghostty/skills/coastty/SKILL.md",
+        );
+        try steps.append(b.allocator, &install_step.step);
+    }
+
+    // coastty's own themes, installed next to the bundled ones so `theme = Coastty` works everywhere
+    {
+        const install_step = b.addInstallDirectory(.{
+            .source_dir = b.path("src/themes"),
+            .install_dir = .{ .custom = "share" },
+            .install_subdir = b.pathJoin(&.{ "ghostty", "themes" }),
+        });
+        try steps.append(b.allocator, &install_step.step);
+    }
+
     // Themes
     if (cfg.emit_themes) {
         if (b.lazyDependency("iterm2_themes", .{})) |upstream| {

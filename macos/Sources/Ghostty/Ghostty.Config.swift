@@ -491,12 +491,102 @@ extension Ghostty {
             )
         }
 
+        /// The configured foreground color, mirroring `backgroundColor`
+        /// above exactly. Used by coastty's sidebar/tab bar (issue #12,
+        /// coastty repo) so their text is drawn from the same live theme
+        /// as the terminal itself, not a fixed palette.
+        var foregroundColor: Color {
+            var color: ghostty_config_color_s = .init()
+            let key = "foreground"
+            if !ghostty_config_get(config, &color, key, UInt(key.lengthOfBytes(using: .utf8))) {
+#if os(macOS)
+                return Color(NSColor.textColor)
+#elseif os(iOS)
+                return Color(UIColor.label)
+#else
+#error("unsupported")
+#endif
+            }
+
+            return .init(
+                red: Double(color.r) / 255,
+                green: Double(color.g) / 255,
+                blue: Double(color.b) / 255
+            )
+        }
+
+        /// The configured 256-color ANSI palette, in index order. Used by
+        /// coastty's sidebar/tab bar (issue #12, coastty repo) to source
+        /// its state-indicator colors (working/green/red) from the live
+        /// theme instead of hardcoded hex values.
+        var palette: [Color] {
+            guard let config = self.config else { return [] }
+            var v: ghostty_config_palette_s = .init()
+            let key = "palette"
+            guard ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8))) else {
+                return []
+            }
+
+            return withUnsafeBytes(of: v.colors) { raw in
+                raw.bindMemory(to: ghostty_config_color_s.self).map { color in
+                    Color(
+                        red: Double(color.r) / 255,
+                        green: Double(color.g) / 255,
+                        blue: Double(color.b) / 255
+                    )
+                }
+            }
+        }
+
         var backgroundOpacity: Double {
             guard let config = self.config else { return 1 }
             var v: Double = 1
             let key = "background-opacity"
             _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
             return v
+        }
+
+        /// "If true, new tabs will inherit the working directory of the
+        /// previously focused tab." (see `Config.zig`'s own doc comment) -
+        /// defaults to true, matching upstream. coastty's own tab creation
+        /// (`TerminalController.coasttyNewTab`) constructs surfaces
+        /// directly in Swift rather than dispatching through the core's
+        /// `new_tab` action, which is what normally reads this setting
+        /// (see `apprt/surface.zig`'s `newConfig`/
+        /// `shouldInheritWorkingDirectory`) - exposed here so coastty can
+        /// replicate that same behavior itself instead of silently
+        /// ignoring the setting.
+        var tabInheritWorkingDirectory: Bool {
+            guard let config = self.config else { return true }
+            var v = true
+            let key = "tab-inherit-working-directory"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
+        /// Same as `tabInheritWorkingDirectory` above, but for
+        /// `window-inherit-working-directory` — governs brand-new windows
+        /// instead of new tabs (see `apprt/surface.zig`'s
+        /// `NewSurfaceContext.window` case). The real mechanism inherits
+        /// from `app.focusedSurface()`, whatever surface is currently
+        /// focused across the entire app.
+        var windowInheritWorkingDirectory: Bool {
+            guard let config = self.config else { return true }
+            var v = true
+            let key = "window-inherit-working-directory"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return v
+        }
+
+        /// coastty-specific, not part of upstream Ghostty: gap (points)
+        /// between Space rows in the sidebar's Spaces section. Clamped to
+        /// 0-16 in `Config.zig`'s `finalize()`.
+        var spaceRowGap: CGFloat {
+            guard let config = self.config else { return 4 }
+            var v: UInt8 = 4
+            let key = "space-row-gap"
+            _ = ghostty_config_get(config, &v, key, UInt(key.lengthOfBytes(using: .utf8)))
+            return CGFloat(v)
         }
 
         var backgroundBlur: BackgroundBlur {

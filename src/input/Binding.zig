@@ -574,6 +574,39 @@ pub const Action = union(enum) {
     /// this will go to the last tab.
     goto_tab: usize,
 
+    /// Open a new Space.
+    new_space,
+
+    /// Go to the previous Space.
+    previous_space,
+
+    /// Go to the next Space.
+    next_space,
+
+    /// Go to the last Space.
+    last_space,
+
+    /// Go to the Space with the specific index, starting from 1.
+    ///
+    /// If the Space number is higher than the number of Spaces,
+    /// this will go to the last Space.
+    goto_space: usize,
+
+    /// Jump to the agent-bearing pane most needing attention (blocked on
+    /// input, or done and not yet seen), cycling to the next one on
+    /// repeated presses. Has no previous/next/last distinction of its own:
+    /// there is only "the next most urgent thing."
+    goto_urgent_agent,
+
+    /// Go to the previous agent-bearing pane, cycling through every one
+    /// (working and idle included, not just blocked/done) in the same
+    /// priority+recency order as the sidebar's Agents list. Wraps at
+    /// either end; a silent no-op with no agent-bearing panes at all.
+    previous_agent,
+
+    /// Go to the next agent-bearing pane. See `previous_agent`.
+    next_agent,
+
     /// Moves a tab by a relative offset.
     ///
     /// Positive values move the tab forwards, and negative values move it
@@ -592,6 +625,19 @@ pub const Action = union(enum) {
     /// Only implemented on Linux, but there's a native tab menu provided by
     /// macOS.
     move_tab_to_new_window,
+
+    /// Moves a Space by a relative offset.
+    ///
+    /// Positive values move the Space forwards, and negative values move it
+    /// backwards. If the new position is out of bounds, it is wrapped around
+    /// cyclically within the Space list.
+    ///
+    /// For example, `move_space:1` moves the Space one position forwards,
+    /// and if it was already the last Space in the list, it wraps around
+    /// and becomes the first Space in the list. Likewise, `move_space:-1`
+    /// moves the Space one position backwards, and if it was the first
+    /// Space, then it will become the last Space.
+    move_space: isize,
 
     /// Toggle the tab overview.
     ///
@@ -731,6 +777,26 @@ pub const Action = union(enum) {
     /// This might trigger a close confirmation popup, depending on the value
     /// of the `confirm-close-surface` configuration setting.
     close_tab: CloseTabMode,
+
+    /// Close the specified Spaces and everything within them.
+    ///
+    /// Valid values:
+    ///
+    ///   - `this` (default)
+    ///
+    ///     Close the current Space.
+    ///
+    ///   - `other`
+    ///
+    ///     Close every Space in the current window except the current one.
+    ///
+    ///   - `right`
+    ///
+    ///     Close every Space to the right of the current one.
+    ///
+    /// Unlike `close_tab`, this closes immediately without a confirmation
+    /// popup, regardless of the `confirm-close-surface` setting.
+    close_space: CloseSpaceMode,
 
     /// Close the current window and all tabs and splits therein.
     ///
@@ -1192,6 +1258,14 @@ pub const Action = union(enum) {
         pub const default: CloseTabMode = .this;
     };
 
+    pub const CloseSpaceMode = enum {
+        this,
+        other,
+        right,
+
+        pub const default: CloseSpaceMode = .this;
+    };
+
     fn parseEnum(comptime T: type, value: []const u8) !T {
         return std.meta.stringToEnum(T, value) orelse return Error.InvalidFormat;
     }
@@ -1395,6 +1469,7 @@ pub const Action = union(enum) {
             .write_selection_file,
             .close_surface,
             .close_tab,
+            .close_space,
             .close_window,
             .toggle_maximize,
             .toggle_fullscreen,
@@ -1423,8 +1498,17 @@ pub const Action = union(enum) {
             .next_tab,
             .last_tab,
             .goto_tab,
+            .new_space,
+            .previous_space,
+            .next_space,
+            .last_space,
+            .goto_space,
+            .goto_urgent_agent,
+            .previous_agent,
+            .next_agent,
             .move_tab,
             .move_tab_to_new_window,
+            .move_space,
             .toggle_tab_overview,
             .new_split,
             .goto_split,

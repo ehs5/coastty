@@ -7,6 +7,7 @@ const App = @import("../App.zig");
 const Surface = @import("../Surface.zig");
 const renderer = @import("../renderer.zig");
 const terminal = @import("../terminal/main.zig");
+const agent_detection = @import("../agent-detection/main.zig");
 const Config = @import("../config.zig").Config;
 const MessageData = @import("../datastruct/main.zig").MessageData;
 
@@ -90,6 +91,10 @@ pub const Message = union(enum) {
 
     /// Report the progress of an action using a GUI element
     progress_report: terminal.osc.Command.ProgressReport,
+
+    /// The surface's detected agent state (Working/Idle/Blocked/Unknown)
+    /// changed and should be republished to the apprt.
+    agent_state_change: agent_detection.AgentDetection,
 
     /// A command has started in the shell, start a timer.
     start_command,

@@ -16,10 +16,12 @@ const input = @import("../input.zig");
 const internal_os = @import("../os/main.zig");
 const renderer = @import("../renderer.zig");
 const terminal = @import("../terminal/main.zig");
+const termio = @import("../termio.zig");
 const CoreApp = @import("../App.zig");
 const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
+const agent_detection = @import("../agent-detection/main.zig");
 const Config = configpkg.Config;
 const String = @import("../main_c.zig").String;
 
@@ -422,6 +424,10 @@ pub const Surface = struct {
     /// that getTitle works without the implementer needing to save it.
     title: ?[:0]const u8 = null,
 
+    /// The app's stable identity for this pane (see `Options`), owned by
+    /// this surface. Null when the app gave none.
+    coastty_pane_id: ?[]const u8 = null,
+
     /// Surface initialization options.
     pub const Options = extern struct {
         /// The platform that this surface is being initialized for and
@@ -463,6 +469,14 @@ pub const Surface = struct {
 
         /// Context for the new surface
         context: apprt.surface.NewSurfaceContext = .window,
+
+        /// coastty: the app's own stable identity for this pane, carried
+        /// across quit/relaunch in its restored session. Used as the
+        /// pane's coastty-host id so it reattaches to its own process
+        /// rather than to whatever the daemon happens to be holding for
+        /// this working directory. Null leaves `HostBackend` to derive
+        /// an id itself.
+        coastty_pane_id: ?[*:0]const u8 = null,
     };
 
     pub fn init(self: *Surface, app: *App, opts: Options) !void {
@@ -478,6 +492,16 @@ pub const Surface = struct {
             .size = .{ .width = 800, .height = 600 },
             .cursor_pos = .{ .x = -1, .y = -1 },
         };
+
+        // Must be in place before `core_surface.init` below: that is where
+        // the pane's process is attached, and it reads this id.
+        if (opts.coastty_pane_id) |c_id| {
+            const pane_id = std.mem.sliceTo(c_id, 0);
+            if (pane_id.len > 0) {
+                self.coastty_pane_id = try app.core_app.alloc.dupe(u8, pane_id);
+            }
+        }
+        errdefer if (self.coastty_pane_id) |v| app.core_app.alloc.free(v);
 
         // Add ourselves to the list of surfaces on the app.
         try app.core_app.addSurface(self);
@@ -602,6 +626,8 @@ pub const Surface = struct {
         // Free our title
         if (self.title) |v| self.app.core_app.alloc.free(v);
 
+        if (self.coastty_pane_id) |v| self.app.core_app.alloc.free(v);
+
         // Remove ourselves from the list of known surfaces in the app.
         self.app.core_app.deleteSurface(self);
 
@@ -637,6 +663,12 @@ pub const Surface = struct {
 
     pub fn rtApp(self: *const Surface) *App {
         return self.app;
+    }
+
+    /// The app's stable identity for this pane, if it gave one. The core
+    /// surface hands this to `HostBackend` as the pane's coastty-host id.
+    pub fn coasttyPaneId(self: *const Surface) ?[]const u8 {
+        return self.coastty_pane_id;
     }
 
     pub fn close(self: *const Surface, process_alive: bool) void {
@@ -1593,6 +1625,135 @@ pub const CAPI = struct {
         return surface.core_surface.child_exited;
     }
 
+    /// Returns true if this pane's process outlives the GUI: it runs on
+    /// coastty-host, so quitting coastty leaves it running rather than
+    /// killing it.
+    export fn ghostty_surface_process_persists(surface: *Surface) bool {
+        return surface.core_surface.processPersistsAfterQuit();
+    }
+
+    /// Writes this surface's coastty-host pane id into `buf` and returns
+    /// how many bytes it wrote, or 0 for a locally spawned pane (which
+    /// has no pane id) or a buffer too small to hold it. The apprt needs
+    /// the id to name the pane in a kill/sweep request when the tab,
+    /// Space or window holding it is closed.
+    export fn ghostty_surface_host_pane_id(
+        surface: *Surface,
+        buf: [*]u8,
+        cap: usize,
+    ) usize {
+        const id = switch (surface.core_surface.io.backend) {
+            .exec => return 0,
+            .host => |*host| host.paneId(),
+        };
+        if (id.len > cap) return 0;
+        @memcpy(buf[0..id.len], id);
+        return id.len;
+    }
+
+    /// Ends the named coastty-host panes, all in one request. Ids are
+    /// NUL-terminated strings; unknown ones are ignored.
+    export fn ghostty_host_kill_panes(ids: [*]const [*:0]const u8, len: usize) void {
+        hostPaneCommand(ids, len, termio.HostBackend.killPanes);
+    }
+
+    /// Hands coastty-host the full set of panes still in use and lets it
+    /// kill everything else it is holding - see `SWEEP` in `host/wire.zig`.
+    export fn ghostty_host_sweep_panes(ids: [*]const [*:0]const u8, len: usize) void {
+        hostPaneCommand(ids, len, termio.HostBackend.sweepPanes);
+    }
+
+    /// Reports one structural change - a Space created, a tab moved, a
+    /// pane landing in another tab - to coastty-host's model. `fields`
+    /// are the op's arguments in order, as NUL-terminated strings; see
+    /// `SPACE`/`TAB`/`PANE` in `host/wire.zig`.
+    export fn ghostty_host_model_op(
+        op: termio.HostBackend.ModelOp,
+        fields: [*]const [*:0]const u8,
+        len: usize,
+    ) termio.HostBackend.ModelOpResult {
+        const alloc = global.alloc();
+        const slices = alloc.alloc([]const u8, len) catch |err| {
+            log.warn("could not build host model op fields err={}", .{err});
+            return .refused;
+        };
+        defer alloc.free(slices);
+        for (slices, 0..) |*slice, i| slice.* = std.mem.sliceTo(fields[i], 0);
+
+        return termio.HostBackend.sendModelOp(alloc, global.io(), op, slices);
+    }
+
+    /// Sets the function the app carries out layout command requests with;
+    /// see `HostBackend.RequestHandler`. Call before
+    /// `ghostty_host_ensure_running`, which starts the subscription they
+    /// arrive on.
+    export fn ghostty_host_set_request_handler(handler: ?termio.HostBackend.RequestHandler) void {
+        termio.HostBackend.setRequestHandler(handler);
+    }
+
+    /// Tells coastty-host which Space, tab and pane the user is looking at,
+    /// any of them empty for nothing - see `FOCUS` in `host/wire.zig`.
+    export fn ghostty_host_report_focus(
+        space: [*:0]const u8,
+        tab: [*:0]const u8,
+        pane: [*:0]const u8,
+    ) void {
+        termio.HostBackend.reportFocus(global.alloc(), global.io(), std.mem.span(space), std.mem.span(tab), std.mem.span(pane));
+    }
+
+    /// Tells coastty-host which windows are open and the Spaces each shows,
+    /// as a `WINDOWS` body of `len` bytes - see `host/wire.zig`.
+    export fn ghostty_host_report_windows(body: [*]const u8, len: usize) void {
+        termio.HostBackend.reportWindows(global.alloc(), global.io(), body[0..len]);
+    }
+
+    /// Starts coastty-host if it is not already running. The app calls
+    /// this before asking for the model, since its windows are built from
+    /// what the daemon holds.
+    export fn ghostty_host_ensure_running() bool {
+        return termio.HostBackend.ensureRunning(global.alloc(), global.io());
+    }
+
+    /// Writes the daemon's model into `buf` as JSON and returns its
+    /// length - or the length needed, when it does not fit, so the caller
+    /// can retry larger. Zero means no daemon answered.
+    export fn ghostty_host_model_snapshot(buf: [*]u8, cap: usize) usize {
+        return termio.HostBackend.fetchModel(global.alloc(), global.io(), buf[0..cap]);
+    }
+
+    /// Points the symlink at `link` to `target`, the app's own executable,
+    /// so `coastty` works from other terminals - see `os/command_link.zig`
+    /// for which existing files it replaces and which it leaves alone.
+    export fn ghostty_command_link_install(
+        link: [*:0]const u8,
+        target: [*:0]const u8,
+    ) internal_os.command_link.Result {
+        return internal_os.command_link.install(global.io(), std.mem.span(link), std.mem.span(target));
+    }
+
+    /// Removes the symlink at `link` if it points into a coastty bundle.
+    export fn ghostty_command_link_uninstall(link: [*:0]const u8) internal_os.command_link.Result {
+        return internal_os.command_link.uninstall(global.io(), std.mem.span(link));
+    }
+
+    /// Shared plumbing for the two id-list host commands: turns the C
+    /// string array into slices and hands them to `f`.
+    fn hostPaneCommand(
+        ids: [*]const [*:0]const u8,
+        len: usize,
+        f: *const fn (Allocator, std.Io, []const []const u8) void,
+    ) void {
+        const alloc = global.alloc();
+        const slices = alloc.alloc([]const u8, len) catch |err| {
+            log.warn("could not build host pane id list err={}", .{err});
+            return;
+        };
+        defer alloc.free(slices);
+        for (slices, 0..) |*slice, i| slice.* = std.mem.sliceTo(ids[i], 0);
+
+        f(alloc, global.io(), slices);
+    }
+
     /// Returns true if the surface has a selection.
     export fn ghostty_surface_has_selection(surface: *Surface) bool {
         return surface.core_surface.hasSelection();
@@ -1719,6 +1880,34 @@ pub const CAPI = struct {
         };
 
         return .fromSlice(copy);
+    }
+
+    /// Records the sidebar's current status for this pane, bumping its
+    /// recency stamp only on a genuine change - see
+    /// `Surface.noteCoasttyAgentStatus`.
+    export fn ghostty_surface_agent_status_note(
+        surface: *Surface,
+        status: agent_detection.AgentStatus,
+    ) void {
+        surface.core_surface.noteCoasttyAgentStatus(status);
+    }
+
+    /// Whether the user is looking at this pane: it is in the active tab of
+    /// the key window. A pane coastty-host owns passes this on, which is
+    /// how it is marked seen.
+    export fn ghostty_surface_set_viewed(surface: *Surface, viewed: bool) void {
+        surface.core_surface.setCoasttyViewed(viewed);
+    }
+
+    /// This pane's current recency stamp - 0 before the first status note.
+    export fn ghostty_surface_agent_status_change_seq(surface: *Surface) u64 {
+        return surface.core_surface.coasttyAgentStatusChangeSeq();
+    }
+
+    /// This status's ranking priority - matches herdr's `status_priority`
+    /// exactly so every client sorts panes the same way.
+    export fn ghostty_agent_status_priority(status: agent_detection.AgentStatus) u8 {
+        return status.priority();
     }
 
     /// Update the color scheme of the surface.

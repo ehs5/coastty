@@ -141,7 +141,13 @@ final class ScriptTab: NSObject {
         }
 
         if let managedTerminalController = tabController as? TerminalController {
-            managedTerminalController.closeTabImmediately(registerRedo: false)
+            // AppleScript's "tab" concept for a coastty window currently
+            // maps 1:1 to the whole window (see `ScriptWindow.controllers`)
+            // — coastty's own multiple-tabs-per-window model (issue #12,
+            // coastty repo) isn't reflected in the scripting bridge yet,
+            // so this closes the window's *active* coastty tab, matching
+            // what AppleScript currently believes "the tab" is.
+            managedTerminalController.closeTabImmediately()
             return nil
         }
 

@@ -28,8 +28,13 @@ pub const Location = enum {
         defer environ_map.deinit();
         return switch (self) {
             .user => user: {
+                // "coastty", not "ghostty" - matches the config file's own
+                // XDG subdir rename (see `build_config.config_app_id`'s
+                // doc comment) so user-installed custom themes live
+                // alongside coastty's own config, not a real Ghostty
+                // installation's.
                 const subdir = std.fs.path.join(arena_alloc, &.{
-                    "ghostty", "themes",
+                    "coastty", "themes",
                 }) catch return error.OutOfMemory;
 
                 break :user internal_os.xdg.config(

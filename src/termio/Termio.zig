@@ -22,6 +22,7 @@ const windows = internal_os.windows;
 const configpkg = @import("../config.zig");
 const ProcessInfo = @import("../pty.zig").ProcessInfo;
 const compat_file = @import("../lib/compat/file.zig");
+const agent_detection = @import("../agent-detection/main.zig");
 
 const log = std.log.scoped(.io_exec);
 
@@ -68,6 +69,11 @@ terminal_stream: StreamHandler.Stream,
 /// Last time the cursor was reset. This is used to prevent message
 /// flooding with cursor resets.
 last_cursor_reset: ?std.Io.Timestamp = null,
+
+/// Detects whether Claude Code is running in this pane and, if so,
+/// whether it's working, idle, or blocked on a permission prompt. Updated
+/// on every PTY-output event; see `updateAgentDetection`.
+agent_detector: agent_detection.Detector,
 
 /// State we have for thread enter. This may be null if we don't need
 /// to keep track of any state or if its already been freed.
@@ -296,6 +302,9 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
         opts.full_config,
     );
 
+    var agent_detector = try agent_detection.Detector.init(alloc);
+    errdefer agent_detector.deinit();
+
     self.* = .{
         .alloc = alloc,
         .terminal = term,
@@ -312,10 +321,12 @@ pub fn init(self: *Termio, alloc: Allocator, opts: termio.Options) !void {
             .handler = handler,
         }),
         .thread_enter_state = thread_enter_state,
+        .agent_detector = agent_detector,
     };
 }
 
 pub fn deinit(self: *Termio) void {
+    self.agent_detector.deinit();
     self.backend.deinit();
     self.terminal.deinit(self.alloc);
     self.config.deinit();
@@ -620,6 +631,15 @@ pub fn jumpToPrompt(self: *Termio, delta: isize) !void {
     try self.renderer_wakeup.notify();
 }
 
+/// Whether the user is looking at this pane, which a pane the daemon owns
+/// reports so the daemon can mark it seen for every client.
+pub fn coasttyViewed(self: *Termio, viewed: bool) void {
+    switch (self.backend) {
+        .host => |*host| host.setViewed(viewed),
+        .exec => {},
+    }
+}
+
 /// Called when focus is gained or lost (when focus events are enabled)
 pub fn focusGained(self: *Termio, td: *ThreadData, focused: bool) !void {
     self.renderer_state.mutex.lockUncancelable(global.io());
@@ -695,11 +715,104 @@ fn processOutputLocked(self: *Termio, buf: []const u8) void {
         self.terminal_stream.nextSlice(buf);
     }
 
+    // Re-check agent detection now that the terminal state (screen
+    // content, OSC title/progress) reflects this output.
+    self.updateAgentDetection(@intCast(@divTrunc(now.nanoseconds, std.time.ns_per_ms)));
+
     // If our stream handling caused messages to be sent to the mailbox
     // thread, then we need to wake it up so that it processes them.
     if (self.terminal_stream.handler.termio_messaged) {
         self.terminal_stream.handler.termio_messaged = false;
         self.mailbox.notify();
+    }
+}
+
+/// Runs one timer-driven detection check and returns how many milliseconds
+/// to wait before the next one. Called from the IO thread's detection
+/// timer, which is what re-examines a pane whose PTY has gone quiet - an
+/// agent waiting on a permission prompt emits nothing until it is answered,
+/// so the output-driven checks alone would leave that state unnoticed.
+///
+/// ported-from: the detection task's loop body in
+/// https://github.com/herdrdev/herdr/blob/master/src/pane.rs
+pub fn tickAgentDetection(self: *Termio) i64 {
+    self.renderer_state.mutex.lockUncancelable(global.io());
+    defer self.renderer_state.mutex.unlock(global.io());
+
+    const now = std.Io.Timestamp.now(global.io(), .awake);
+    const now_ms: i64 = @intCast(@divTrunc(now.nanoseconds, std.time.ns_per_ms));
+
+    self.updateAgentDetection(now_ms);
+    return self.agent_detector.tickIntervalMs(now_ms);
+}
+
+/// Runs Claude Code presence and state detection against the current
+/// screen/OSC snapshot, and forwards the result to the apprt if the
+/// published state changed. Called from `processOutputLocked` on every
+/// PTY-output event, and from `tickAgentDetection` on a timer in between.
+fn updateAgentDetection(self: *Termio, now_ms: i64) void {
+    // The daemon owns a host-backed pane and detects its agent itself,
+    // reporting each change on the pane's stream.
+    if (self.backend == .host) return;
+
+    // `getProcessInfo` widens the pgid to u64; the detector tracks it as the
+    // u32 the kernel actually reports, matching herdr's `Option<u32>`.
+    const foreground_pgid: ?u32 = if (self.getProcessInfo(.foreground_pid)) |pgid|
+        std.math.cast(u32, pgid)
+    else
+        null;
+
+    const observed = self.agent_detector.observeForegroundProcess(
+        self.alloc,
+        now_ms,
+        self.paneChildPid(),
+        foreground_pgid,
+    );
+    const agent = observed.agent;
+
+    // The common case (a plain shell tab, or any tab Claude isn't the
+    // foreground process of) doesn't need the screen content at all -
+    // Detector's no-agent path ignores it - so skip the dump/allocation
+    // entirely rather than paying for it on every single output event.
+    if (agent == null) {
+        self.publishAgentDetection(self.agent_detector.update(
+            self.alloc,
+            now_ms,
+            null,
+            observed.process_exited,
+            .{ .screen = "" },
+        ) catch |err| {
+            log.warn("agent detection failed err={}", .{err});
+            return;
+        } orelse return);
+        return;
+    }
+
+    var arena_state = std.heap.ArenaAllocator.init(self.alloc);
+    defer arena_state.deinit();
+    const screen = self.terminal.plainString(arena_state.allocator()) catch |err| {
+        log.warn("agent detection: failed to read screen content err={}", .{err});
+        return;
+    };
+
+    var progress_buf: [16]u8 = undefined;
+    self.publishAgentDetection(self.agent_detector.update(self.alloc, now_ms, agent, observed.process_exited, .{
+        .screen = screen,
+        .osc_title = self.terminal.getTitle() orelse "",
+        .osc_progress = agent_detection.formatOscProgress(&progress_buf, self.terminal_stream.handler.last_progress_report),
+    }) catch |err| {
+        log.warn("agent detection failed err={}", .{err});
+        return;
+    } orelse return);
+}
+
+fn publishAgentDetection(self: *Termio, detection: agent_detection.AgentDetection) void {
+    // See `StreamHandler.surfaceMessageWriter` for why we retry with
+    // `.forever` if `.instant` would have blocked.
+    if (self.surface_mailbox.push(.{ .agent_state_change = detection }, .{ .instant = {} }) == 0) {
+        self.renderer_state.mutex.unlock(global.io());
+        defer self.renderer_state.mutex.lockUncancelable(global.io());
+        _ = self.surface_mailbox.push(.{ .agent_state_change = detection }, .{ .forever = {} });
     }
 }
 
@@ -785,4 +898,8 @@ pub const ThreadData = struct {
 /// not available on a particular platform.
 pub fn getProcessInfo(self: *Termio, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.backend.getProcessInfo(info);
+}
+
+pub fn paneChildPid(self: *Termio) ?u32 {
+    return self.backend.paneChildPid();
 }

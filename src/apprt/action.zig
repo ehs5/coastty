@@ -6,6 +6,7 @@ const configpkg = @import("../config.zig");
 const input = @import("../input.zig");
 const renderer = @import("../renderer.zig");
 const terminal = @import("../terminal/main.zig");
+const agent_detection = @import("../agent-detection/main.zig");
 const CoreSurface = @import("../Surface.zig");
 const lib = @import("../lib/main.zig");
 const compat_testing = @import("../lib/compat/testing.zig");
@@ -132,6 +133,13 @@ pub const Action = union(Key) {
     /// for right). If the new position is out of bounds, it wraps around
     /// cyclically within the tab range.
     move_tab: MoveTab,
+
+    /// Moves a Space by a relative offset.
+    ///
+    /// Adjusts the Space position based on `offset` (e.g., -1 for left, +1
+    /// for right). If the new position is out of bounds, it wraps around
+    /// cyclically within the Space range.
+    move_space: MoveSpace,
 
     /// Jump to a specific tab. Must handle the scenario that the tab
     /// value is invalid.
@@ -354,6 +362,37 @@ pub const Action = union(Key) {
     /// Move a tab to a new window.
     move_tab_to_new_window,
 
+    /// Jump to a specific Space. Must handle the scenario that the Space
+    /// value is invalid.
+    goto_space: GotoSpace,
+
+    /// Open a new Space. If the target is a surface it should be opened in
+    /// the same window as the surface.
+    new_space,
+
+    /// Closes the Space belonging to the currently focused split, or other
+    /// Spaces, depending on the mode.
+    close_space: CloseSpaceMode,
+
+    /// A surface's detected agent state changed (e.g. Claude Code went
+    /// from working to idle, or started needing permission). The apprt
+    /// should read the target surface itself for anything beyond this
+    /// payload; this carries no other identifying info.
+    agent_state_change: agent_detection.AgentDetection,
+
+    /// Jump to the agent-bearing pane most needing attention. The apprt
+    /// owns the actual pane list and "what's most urgent" ordering, the
+    /// same way it already owns tab/Space navigation for `goto_tab`/
+    /// `goto_space` - this carries no payload of its own.
+    goto_urgent_agent,
+
+    /// Go to the previous/next agent-bearing pane, cycling through the
+    /// full list (not filtered to what needs attention) in the apprt's own
+    /// priority+recency order. No payload, same reasoning as
+    /// `goto_urgent_agent`.
+    previous_agent,
+    next_agent,
+
     /// Sync with: ghostty_action_tag_e
     pub const Key = enum(c_int) {
         quit,
@@ -371,6 +410,7 @@ pub const Action = union(Key) {
         toggle_visibility,
         toggle_background_opacity,
         move_tab,
+        move_space,
         goto_tab,
         goto_split,
         goto_window,
@@ -424,6 +464,13 @@ pub const Action = union(Key) {
         readonly,
         copy_title_to_clipboard,
         move_tab_to_new_window,
+        goto_space,
+        new_space,
+        close_space,
+        agent_state_change,
+        goto_urgent_agent,
+        previous_agent,
+        next_agent,
 
         test "ghostty.h Action.Key" {
             try lib.checkGhosttyHEnum(Key, "GHOSTTY_ACTION_");
@@ -559,6 +606,10 @@ pub const MoveTab = extern struct {
     amount: isize,
 };
 
+pub const MoveSpace = extern struct {
+    amount: isize,
+};
+
 /// The tab to jump to. This is non-exhaustive so that integer values represent
 /// the index (zero-based) of the tab to jump to. Negative values are special
 /// values.
@@ -571,6 +622,21 @@ pub const GotoTab = enum(c_int) {
     // TODO: check non-exhaustive enums
     // test "ghostty.h GotoTab" {
     //     try lib.checkGhosttyHEnum(GotoTab, "GHOSTTY_GOTO_TAB_");
+    // }
+};
+
+/// The Space to jump to. This is non-exhaustive so that integer values
+/// represent the index (zero-based) of the Space to jump to. Negative
+/// values are special values.
+pub const GotoSpace = enum(c_int) {
+    previous = -1,
+    next = -2,
+    last = -3,
+    _,
+
+    // TODO: check non-exhaustive enums
+    // test "ghostty.h GotoSpace" {
+    //     try lib.checkGhosttyHEnum(GotoSpace, "GHOSTTY_GOTO_SPACE_");
     // }
 };
 
@@ -982,6 +1048,20 @@ pub const CloseTabMode = enum(c_int) {
 
     test "ghostty.h CloseTabMode" {
         try lib.checkGhosttyHEnum(CloseTabMode, "GHOSTTY_ACTION_CLOSE_TAB_MODE_");
+    }
+};
+
+/// sync with ghostty_action_close_space_mode_e in ghostty.h
+pub const CloseSpaceMode = enum(c_int) {
+    /// Close the current Space.
+    this,
+    /// Close all other Spaces.
+    other,
+    /// Close all Spaces to the right of the current Space.
+    right,
+
+    test "ghostty.h CloseSpaceMode" {
+        try lib.checkGhosttyHEnum(CloseSpaceMode, "GHOSTTY_ACTION_CLOSE_SPACE_MODE_");
     }
 };
 

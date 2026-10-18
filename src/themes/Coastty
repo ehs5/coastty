@@ -1,0 +1,28 @@
+# coastty's own theme: the colours of the coastty website's dark app
+# window. The background is the app icon's tile, and the icon's sand,
+# palm and tide are lifted for text on it. The sidebar reads agent states
+# from fixed slots, so those hold the design's exact colours: bright
+# yellow is working, bright cyan is done, bright red is blocked and green
+# is idle. Select it with `theme = Coastty`.
+palette = 0=#3a3d43
+palette = 1=#e0857c
+palette = 2=#a3c9b6
+palette = 3=#f0d6a0
+palette = 4=#8facc8
+palette = 5=#c9a0c4
+palette = 6=#86c4be
+palette = 7=#c9c6bf
+palette = 8=#8e9094
+palette = 9=#ee9a91
+palette = 10=#b8d6c6
+palette = 11=#f0d6a0
+palette = 12=#a6c0d8
+palette = 13=#d8b6d4
+palette = 14=#8fd3cc
+palette = 15=#f2ede3
+background = #292c33
+foreground = #e8e4da
+cursor-color = #f0d6a0
+cursor-text = #292c33
+selection-background = #474a50
+selection-foreground = #f2ede3

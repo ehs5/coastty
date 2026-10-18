@@ -82,6 +82,9 @@ pub const Message = union(enum) {
     /// The surface gained or lost focus.
     focused: bool,
 
+    /// The user started or stopped looking at this pane.
+    coastty_viewed: bool,
+
     /// Write where the data fits in the union.
     write_small: WriteReq.Small,
 

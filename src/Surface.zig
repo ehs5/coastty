@@ -37,6 +37,7 @@ const internal_os = @import("os/main.zig");
 const inspectorpkg = @import("inspector/main.zig");
 const SurfaceMouse = @import("surface_mouse.zig");
 const ProcessInfo = @import("pty.zig").ProcessInfo;
+const agent_detection = @import("agent-detection/main.zig");
 
 const log = std.log.scoped(.surface);
 
@@ -179,6 +180,18 @@ search: ?Search = null,
 
 /// Used to rate limit BEL handling.
 last_bell_time: ?std.Io.Timestamp = null,
+
+/// The sidebar/tab-bar's last-reported `AgentStatus` for this pane, and the
+/// recency stamp assigned when it last genuinely changed - see
+/// `noteCoasttyAgentStatus`. Lives here rather than on `io.agent_detector`
+/// because it's driven by the apprt's own "has the user seen this" state
+/// (main-thread only), not by anything the IO thread observes.
+coastty_status_recency: agent_detection.StatusRecency = .{},
+
+/// The daemon's recency for this pane, once it has reported one. It orders
+/// a pane the daemon owns in place of `coastty_status_recency`, so every
+/// client orders agents the same way.
+coastty_host_recency: ?u64 = null,
 
 /// The effect of an input event. This can be used by callers to take
 /// the appropriate action after an input event. For example, key
@@ -638,6 +651,8 @@ pub fn init(
     // This separate block ({}) is important because our errdefers must
     // be scoped here to be valid.
     {
+        const working_directory = if (config.@"working-directory") |wd| wd.value() else null;
+
         var env = rt_surface.defaultTermioEnv() catch |err| env: {
             // If an error occurs, we don't want to block surface startup.
             log.warn("error getting env map for surface err={}", .{err});
@@ -654,7 +669,6 @@ pub fn init(
             std.fmt.bufPrint(&buf, "0x{x:0>16}", .{self.id}) catch unreachable,
         );
 
-        // Initialize our IO backend
         var io_exec = try termio.Exec.init(alloc, .{
             .command = command,
             .env = env,
@@ -662,13 +676,52 @@ pub fn init(
             .shell_integration = config.@"shell-integration",
             .shell_integration_features = config.@"shell-integration-features",
             .cursor_blink = config.@"cursor-style-blink",
-            .working_directory = if (config.@"working-directory") |wd| wd.value() else null,
+            .working_directory = working_directory,
             .resources_dir = global.resourcesDir().host(),
             .term = config.term,
             .rt_pre_exec_info = .init(config),
             .rt_post_fork_info = .init(config),
         });
-        errdefer io_exec.deinit();
+        var io_exec_owned = true;
+        errdefer if (io_exec_owned) io_exec.deinit();
+
+        // coastty: try to route this pane's real process through
+        // coastty-host (starting it if it isn't running) instead of
+        // spawning `io_exec` locally, so it keeps running - and can be
+        // reattached to - independent of coastty's own lifetime. Reuses
+        // `io_exec`'s own already-resolved cwd/argv/env (shell
+        // integration included) rather than a separate, thinner
+        // resolution of what to run, so a host-attached pane's shell is
+        // indistinguishable from a local one - same OSC 7/133 reporting,
+        // same title behavior. Any failure to reach or start the daemon
+        // falls back to spawning `io_exec` locally exactly as coastty
+        // always has, so a pane's behavior is only ever different from
+        // before when this outright succeeds.
+        //
+        // The apprt's own stable, persisted identity for this pane, when
+        // its runtime has one to hand down (only the macOS app does), is
+        // what makes a pane come back to its *own* process rather than to
+        // whatever the daemon still holds for its working directory.
+        const pane_id: ?[]const u8 = if (comptime @hasDecl(apprt.Surface, "coasttyPaneId"))
+            rt_surface.coasttyPaneId()
+        else
+            null;
+
+        const grid = size.grid();
+        var backend: termio.Backend = if (termio.HostBackend.connectForExec(
+            alloc,
+            global.io(),
+            config.@"coastty-process-persistence",
+            &io_exec,
+            pane_id,
+            grid.columns,
+            grid.rows,
+        )) |attached| host_backend: {
+            io_exec.deinit();
+            break :host_backend .{ .host = termio.HostBackend.init(alloc, attached, working_directory) };
+        } else .{ .exec = io_exec };
+        io_exec_owned = false;
+        errdefer backend.deinit();
 
         // Initialize our IO mailbox
         var io_mailbox = try termio.Mailbox.initSPSC(alloc);
@@ -678,7 +731,7 @@ pub fn init(
             .size = size,
             .full_config = config,
             .config = try termio.Termio.DerivedConfig.init(alloc, config),
-            .backend = .{ .exec = io_exec },
+            .backend = backend,
             .mailbox = io_mailbox,
             .renderer_state = &self.renderer_state,
             .renderer_wakeup = render_thread.wakeup,
@@ -967,6 +1020,12 @@ pub fn needsConfirmQuit(self: *Surface) bool {
     };
 }
 
+/// True if this pane's process outlives the GUI: it runs on coastty-host,
+/// so quitting coastty leaves it running and reattaches to it next launch.
+pub fn processPersistsAfterQuit(self: *Surface) bool {
+    return self.io.backend == .host;
+}
+
 /// Called from the app thread to handle mailbox messages to our specific
 /// surface.
 pub fn handleMessage(self: *Surface, msg: Message) !void {
@@ -1130,6 +1189,17 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
                 v,
             ) catch |err| {
                 log.warn("apprt failed to report progress err={}", .{err});
+            };
+        },
+
+        .agent_state_change => |v| {
+            if (v.host) |host| self.coastty_host_recency = host.recency;
+            _ = self.rt_app.performAction(
+                .{ .surface = self },
+                .agent_state_change,
+                v,
+            ) catch |err| {
+                log.warn("apprt failed to report agent state change err={}", .{err});
             };
         },
 
@@ -1330,9 +1400,14 @@ fn childExitedAbnormally(
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    // Build up our command for the error message
+    // Build up our command for the error message. A host-backed pane
+    // doesn't reach here in practice yet - `HostBackend` doesn't report
+    // an abnormal exit to the surface mailbox at all (a known gap, see
+    // `HostBackend.childExitedAbnormally`) - but the switch still needs
+    // to be exhaustive.
     const command = try std.mem.join(alloc, " ", switch (self.io.backend) {
         .exec => |*exec| exec.subprocess.args,
+        .host => &.{"coastty-host pane"},
     });
     const runtime_str = try std.fmt.allocPrint(alloc, "{d} ms", .{info.runtime_ms});
 
@@ -5308,9 +5383,25 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             {},
         ),
 
+        .new_space => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .new_space,
+            {},
+        ),
+
         .close_tab => |v| return try self.rt_app.performAction(
             .{ .surface = self },
             .close_tab,
+            switch (v) {
+                .this => .this,
+                .other => .other,
+                .right => .right,
+            },
+        ),
+
+        .close_space => |v| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .close_space,
             switch (v) {
                 .this => .this,
                 .other => .other,
@@ -5334,6 +5425,40 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             },
         ),
 
+        inline .previous_space,
+        .next_space,
+        .last_space,
+        .goto_space,
+        => |v, tag| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .goto_space,
+            switch (tag) {
+                .previous_space => .previous,
+                .next_space => .next,
+                .last_space => .last,
+                .goto_space => @enumFromInt(v),
+                else => comptime unreachable,
+            },
+        ),
+
+        .goto_urgent_agent => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .goto_urgent_agent,
+            {},
+        ),
+
+        .previous_agent => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .previous_agent,
+            {},
+        ),
+
+        .next_agent => return try self.rt_app.performAction(
+            .{ .surface = self },
+            .next_agent,
+            {},
+        ),
+
         .move_tab => |position| return try self.rt_app.performAction(
             .{ .surface = self },
             .move_tab,
@@ -5344,6 +5469,12 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
             .{ .surface = self },
             .move_tab_to_new_window,
             {},
+        ),
+
+        .move_space => |position| return try self.rt_app.performAction(
+            .{ .surface = self },
+            .move_space,
+            .{ .amount = position },
         ),
 
         .new_split => |direction| return try self.rt_app.performAction(
@@ -5681,6 +5812,7 @@ fn closingAction(action: input.Binding.Action) bool {
         .close_surface,
         .close_window,
         .close_tab,
+        .close_space,
         => true,
 
         else => false,
@@ -6087,6 +6219,26 @@ fn presentSurface(self: *Surface) !void {
 /// not available on a particular platform.
 pub fn getProcessInfo(self: *Surface, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.io.getProcessInfo(info);
+}
+
+/// Passes on whether the user is looking at this pane. Only a pane the
+/// daemon owns does anything with it.
+pub fn setCoasttyViewed(self: *Surface, viewed: bool) void {
+    self.queueIo(.{ .coastty_viewed = viewed }, .unlocked);
+}
+
+/// Records this pane's current `AgentStatus` - already folded with
+/// whatever "seen" tracking the apprt owns, since this module has no way
+/// to know that itself - bumping its recency stamp only on a genuine
+/// change from what was last recorded.
+pub fn noteCoasttyAgentStatus(self: *Surface, status: agent_detection.AgentStatus) void {
+    self.coastty_status_recency.note(status);
+}
+
+/// This pane's current recency stamp, as last set by
+/// `noteCoasttyAgentStatus` - 0 before the first call.
+pub fn coasttyAgentStatusChangeSeq(self: *Surface) u64 {
+    return self.coastty_host_recency orelse self.coastty_status_recency.change_seq;
 }
 
 test "queueIo frees allocated writes in readonly mode" {

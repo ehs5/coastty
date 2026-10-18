@@ -477,6 +477,7 @@ typedef struct {
   const char* initial_input;
   bool wait_after_command;
   ghostty_surface_context_e context;
+  const char* coastty_pane_id;
 } ghostty_surface_config_s;
 
 typedef struct {
@@ -609,12 +610,24 @@ typedef struct {
   ssize_t amount;
 } ghostty_action_move_tab_s;
 
+// apprt.action.MoveSpace
+typedef struct {
+  ssize_t amount;
+} ghostty_action_move_space_s;
+
 // apprt.action.GotoTab
 typedef enum {
   GHOSTTY_GOTO_TAB_PREVIOUS = -1,
   GHOSTTY_GOTO_TAB_NEXT = -2,
   GHOSTTY_GOTO_TAB_LAST = -3,
 } ghostty_action_goto_tab_e;
+
+// apprt.action.GotoSpace
+typedef enum {
+  GHOSTTY_GOTO_SPACE_PREVIOUS = -1,
+  GHOSTTY_GOTO_SPACE_NEXT = -2,
+  GHOSTTY_GOTO_SPACE_LAST = -3,
+} ghostty_action_goto_space_e;
 
 // apprt.action.Fullscreen
 typedef enum {
@@ -835,6 +848,79 @@ typedef enum {
   GHOSTTY_ACTION_CLOSE_TAB_MODE_RIGHT,
 } ghostty_action_close_tab_mode_e;
 
+// apprt.action.CloseSpaceMode
+typedef enum {
+  GHOSTTY_ACTION_CLOSE_SPACE_MODE_THIS,
+  GHOSTTY_ACTION_CLOSE_SPACE_MODE_OTHER,
+  GHOSTTY_ACTION_CLOSE_SPACE_MODE_RIGHT,
+} ghostty_action_close_space_mode_e;
+
+// agent_detection.AgentState
+typedef enum {
+  GHOSTTY_AGENT_STATE_IDLE,
+  GHOSTTY_AGENT_STATE_WORKING,
+  GHOSTTY_AGENT_STATE_BLOCKED,
+  GHOSTTY_AGENT_STATE_UNKNOWN,
+} ghostty_agent_state_e;
+
+// agent_detection.CAgent
+typedef enum {
+  GHOSTTY_AGENT_CLAUDE,
+} ghostty_agent_e;
+
+// agent_detection.AgentStatus
+typedef enum {
+  GHOSTTY_AGENT_STATUS_IDLE,
+  GHOSTTY_AGENT_STATUS_WORKING,
+  GHOSTTY_AGENT_STATUS_BLOCKED,
+  GHOSTTY_AGENT_STATUS_DONE,
+  GHOSTTY_AGENT_STATUS_UNKNOWN,
+} ghostty_agent_status_e;
+
+// agent_detection.AgentDetection.C
+typedef struct {
+  ghostty_agent_state_e state;
+  bool has_agent;
+  ghostty_agent_e agent;
+  bool visible_idle;
+  bool visible_blocker;
+  bool visible_working;
+  bool has_host;
+  ghostty_agent_status_e host_attention;
+} ghostty_action_agent_state_change_s;
+
+// termio.HostBackend.ModelOp
+typedef enum {
+  GHOSTTY_HOST_MODEL_OP_SPACE_NEW,
+  GHOSTTY_HOST_MODEL_OP_SPACE_CLOSE,
+  GHOSTTY_HOST_MODEL_OP_SPACE_RENAME,
+  GHOSTTY_HOST_MODEL_OP_SPACE_MOVE,
+  GHOSTTY_HOST_MODEL_OP_SPACE_HIDE,
+  GHOSTTY_HOST_MODEL_OP_SPACE_SHOW,
+  GHOSTTY_HOST_MODEL_OP_TAB_NEW,
+  GHOSTTY_HOST_MODEL_OP_TAB_CLOSE,
+  GHOSTTY_HOST_MODEL_OP_TAB_RENAME,
+  GHOSTTY_HOST_MODEL_OP_TAB_MOVE,
+  GHOSTTY_HOST_MODEL_OP_PANE_MOVE,
+} ghostty_host_model_op_e;
+
+// termio.HostBackend.ModelOpResult
+typedef enum {
+  GHOSTTY_HOST_MODEL_RESULT_OK,
+  GHOSTTY_HOST_MODEL_RESULT_REFUSED,
+  GHOSTTY_HOST_MODEL_RESULT_NO_HOST,
+} ghostty_host_model_result_e;
+
+// os.command_link.Result
+typedef enum {
+  GHOSTTY_COMMAND_LINK_OK,
+  GHOSTTY_COMMAND_LINK_NEEDS_ADMIN,
+  GHOSTTY_COMMAND_LINK_FOREIGN,
+  GHOSTTY_COMMAND_LINK_NOT_INSTALLED,
+  GHOSTTY_COMMAND_LINK_TRANSLOCATED,
+  GHOSTTY_COMMAND_LINK_FAILED,
+} ghostty_command_link_result_e;
+
 // apprt.surface.Message.ChildExited
 typedef struct {
   uint32_t exit_code;
@@ -905,6 +991,7 @@ typedef enum {
   GHOSTTY_ACTION_TOGGLE_VISIBILITY,
   GHOSTTY_ACTION_TOGGLE_BACKGROUND_OPACITY,
   GHOSTTY_ACTION_MOVE_TAB,
+  GHOSTTY_ACTION_MOVE_SPACE,
   GHOSTTY_ACTION_GOTO_TAB,
   GHOSTTY_ACTION_GOTO_SPLIT,
   GHOSTTY_ACTION_GOTO_WINDOW,
@@ -958,13 +1045,22 @@ typedef enum {
   GHOSTTY_ACTION_READONLY,
   GHOSTTY_ACTION_COPY_TITLE_TO_CLIPBOARD,
   GHOSTTY_ACTION_MOVE_TAB_TO_NEW_WINDOW,
+  GHOSTTY_ACTION_GOTO_SPACE,
+  GHOSTTY_ACTION_NEW_SPACE,
+  GHOSTTY_ACTION_CLOSE_SPACE,
+  GHOSTTY_ACTION_AGENT_STATE_CHANGE,
+  GHOSTTY_ACTION_GOTO_URGENT_AGENT,
+  GHOSTTY_ACTION_PREVIOUS_AGENT,
+  GHOSTTY_ACTION_NEXT_AGENT,
 } ghostty_action_tag_e;
 
 typedef union {
   ghostty_action_split_direction_e new_split;
   ghostty_action_fullscreen_e toggle_fullscreen;
   ghostty_action_move_tab_s move_tab;
+  ghostty_action_move_space_s move_space;
   ghostty_action_goto_tab_e goto_tab;
+  ghostty_action_goto_space_e goto_space;
   ghostty_action_goto_split_e goto_split;
   ghostty_action_goto_window_e goto_window;
   ghostty_action_resize_split_s resize_split;
@@ -993,6 +1089,8 @@ typedef union {
   ghostty_action_config_change_s config_change;
   ghostty_action_open_url_s open_url;
   ghostty_action_close_tab_mode_e close_tab_mode;
+  ghostty_action_close_space_mode_e close_space_mode;
+  ghostty_action_agent_state_change_s agent_state_change;
   ghostty_surface_message_childexited_s child_exited;
   ghostty_action_progress_report_s progress_report;
   ghostty_action_command_finished_s command_finished;
@@ -1073,6 +1171,7 @@ typedef enum {
 
 GHOSTTY_API int ghostty_init(uintptr_t, char**);
 GHOSTTY_API void ghostty_cli_try_action(void);
+GHOSTTY_API void ghostty_cli_try_layout_command(int, char**);
 GHOSTTY_API ghostty_info_s ghostty_info(void);
 GHOSTTY_API const char* ghostty_translate(const char*);
 GHOSTTY_API void ghostty_string_free(ghostty_string_s);
@@ -1119,6 +1218,20 @@ GHOSTTY_API ghostty_surface_config_s ghostty_surface_inherited_config(ghostty_su
 GHOSTTY_API void ghostty_surface_update_config(ghostty_surface_t, ghostty_config_t);
 GHOSTTY_API bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_process_exited(ghostty_surface_t);
+GHOSTTY_API bool ghostty_surface_process_persists(ghostty_surface_t);
+GHOSTTY_API size_t ghostty_surface_host_pane_id(ghostty_surface_t, char*, size_t);
+GHOSTTY_API void ghostty_host_kill_panes(const char* const*, size_t);
+GHOSTTY_API void ghostty_host_sweep_panes(const char* const*, size_t);
+GHOSTTY_API void ghostty_host_set_request_handler(void (*)(const char*, size_t));
+GHOSTTY_API bool ghostty_host_ensure_running(void);
+GHOSTTY_API void ghostty_host_report_focus(const char*, const char*, const char*);
+GHOSTTY_API void ghostty_host_report_windows(const char*, size_t);
+GHOSTTY_API ghostty_command_link_result_e ghostty_command_link_install(const char*, const char*);
+GHOSTTY_API ghostty_command_link_result_e ghostty_command_link_uninstall(const char*);
+GHOSTTY_API size_t ghostty_host_model_snapshot(char*, size_t);
+GHOSTTY_API ghostty_host_model_result_e ghostty_host_model_op(ghostty_host_model_op_e,
+                                                                 const char* const*,
+                                                                 size_t);
 GHOSTTY_API void ghostty_surface_refresh(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_draw(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
@@ -1128,6 +1241,11 @@ GHOSTTY_API void ghostty_surface_set_size(ghostty_surface_t, uint32_t, uint32_t)
 GHOSTTY_API ghostty_surface_size_s ghostty_surface_size(ghostty_surface_t);
 GHOSTTY_API uint64_t ghostty_surface_foreground_pid(ghostty_surface_t);
 GHOSTTY_API ghostty_string_s ghostty_surface_tty_name(ghostty_surface_t);
+GHOSTTY_API void ghostty_surface_agent_status_note(ghostty_surface_t,
+                                                      ghostty_agent_status_e);
+GHOSTTY_API uint64_t ghostty_surface_agent_status_change_seq(ghostty_surface_t);
+GHOSTTY_API void ghostty_surface_set_viewed(ghostty_surface_t, bool);
+GHOSTTY_API uint8_t ghostty_agent_status_priority(ghostty_agent_status_e);
 GHOSTTY_API void ghostty_surface_set_color_scheme(ghostty_surface_t,
                                                      ghostty_color_scheme_e);
 GHOSTTY_API ghostty_input_mods_e ghostty_surface_key_translation_mods(ghostty_surface_t,

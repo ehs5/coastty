@@ -42,8 +42,18 @@ class BaseTerminalController: NSWindowController,
 
     /// The currently focused surface.
     var focusedSurface: Ghostty.SurfaceView? {
-        didSet { syncFocusToSurfaceTree() }
+        didSet {
+            syncFocusToSurfaceTree()
+            focusedSurfaceDidChange()
+        }
     }
+
+    /// Called whenever focus moves to a different pane, from any path -
+    /// clicking into a split, a focus-split keybind, closing a pane, or
+    /// activating a tab. Subclasses that render something keyed to which
+    /// pane is focused override this; `focusedSurface` is a plain stored
+    /// property with no publisher, so there is nothing to subscribe to.
+    func focusedSurfaceDidChange() {}
 
     /// The tree of splits within this terminal window.
     @Published var surfaceTree: SplitTree<Ghostty.SurfaceView> = .init() {
@@ -442,8 +452,18 @@ class BaseTerminalController: NSWindowController,
             } else {
                 self.titleOverride = newTitle
             }
+            self.titleOverrideDidChange()
         }
     }
+
+    /// Called right after `titleOverride` changes via the prompt above.
+    /// A no-op here - `titleOverride` is a per-*controller* property, and
+    /// this class has no concept of "tabs" (QuickTerminalController etc.
+    /// don't need this). `TerminalController` overrides this to also sync
+    /// its per-tab title storage and refresh its own tab bar/sidebar,
+    /// since a coastty window can hold many tabs and its own display
+    /// doesn't read `titleOverride` directly.
+    func titleOverrideDidChange() {}
 
     /// Close a surface from a view.
     func closeSurface(
@@ -466,7 +486,7 @@ class BaseTerminalController: NSWindowController,
 
         // If the child process is not alive, then we exit immediately
         guard withConfirmation else {
-            removeSurfaceNode(node)
+            closeSurfaceNode(node)
             return
         }
 
@@ -480,7 +500,7 @@ class BaseTerminalController: NSWindowController,
             informativeText: "The terminal still has a running process. If you close the terminal the process will be killed."
         ) { [weak self] in
             if let self {
-                self.removeSurfaceNode(node)
+                self.closeSurfaceNode(node)
             }
         }
     }
@@ -501,7 +521,7 @@ class BaseTerminalController: NSWindowController,
         }
     }
 
-    /// Remove a node from the surface tree and move focus appropriately.
+    /// Remove a node from the surface tree and move focus appropriately, leaving whatever runs in it alone - see `closeSurfaceNode` for a real close.
     ///
     /// This also updates the undo manager to support restoring this node.
     ///
@@ -528,12 +548,31 @@ class BaseTerminalController: NSWindowController,
         )
     }
 
+    /// Closes a node for real: ends the process in every pane it holds (only its own - siblings it was split from are untouched), then takes it out of the tree.
+    private func closeSurfaceNode(_ node: SplitTree<Ghostty.SurfaceView>.Node) {
+        CoasttyPaneLifecycle.kill(CoasttyPaneLifecycle.hostIDs(of: node.map(\.closingPane)))
+        removeSurfaceNode(node)
+    }
+
+    /// Captures wherever a subclass needs undo/redo to target - e.g. a specific Space/tab, so it stays correct even if the user switches away before undoing. The base controller has no such addressing, so there's nothing to capture.
+    func captureSurfaceTreeUndoContext() -> Any? { nil }
+
+    /// Installs `tree` as the active surface tree for one undo/redo step, given the context `captureSurfaceTreeUndoContext()` returned when the edit began. Returns false if that context no longer resolves to anything (its target was removed since), in which case the step does nothing.
+    @discardableResult
+    func installSurfaceTree(_ tree: SplitTree<Ghostty.SurfaceView>, context: Any?) -> Bool {
+        surfaceTree = tree
+        return true
+    }
+
     func replaceSurfaceTree(
         _ newTree: SplitTree<Ghostty.SurfaceView>,
         moveFocusTo newView: Ghostty.SurfaceView? = nil,
         moveFocusFrom oldView: Ghostty.SurfaceView? = nil,
         undoAction: String? = nil
     ) {
+        // Capture before mutating - a subclass may need to know where this edit came from, not wherever's active by the time undo/redo actually fires.
+        let context = captureSurfaceTreeUndoContext()
+
         // Setup our new split tree
         let oldTree = surfaceTree
         surfaceTree = newTree
@@ -543,33 +582,38 @@ class BaseTerminalController: NSWindowController,
             }
         }
 
-        // Setup our undo
+        registerSurfaceTreeUndo(
+            installing: oldTree, focusingTo: oldView,
+            thenInstalling: newTree, focusingTo: newView,
+            context: context, undoAction: undoAction)
+    }
+
+    /// Registers one undo step that installs `tree` (moving focus to `focusView`), then chains a matching redo step installing `otherTree` (focusing `otherFocusView`) - alternating indefinitely so repeated undo/redo keeps targeting whatever `context` pinned down, no matter how many times the user switches away in between.
+    private func registerSurfaceTreeUndo(
+        installing tree: SplitTree<Ghostty.SurfaceView>,
+        focusingTo focusView: Ghostty.SurfaceView?,
+        thenInstalling otherTree: SplitTree<Ghostty.SurfaceView>,
+        focusingTo otherFocusView: Ghostty.SurfaceView?,
+        context: Any?,
+        undoAction: String?
+    ) {
         guard let undoManager else { return }
         if let undoAction {
             undoManager.setActionName(undoAction)
         }
 
-        undoManager.registerUndo(
-            withTarget: self,
-            expiresAfter: undoExpiration
-        ) { target in
-            target.surfaceTree = oldTree
-            if let oldView {
+        undoManager.registerUndo(withTarget: self, expiresAfter: undoExpiration) { target in
+            guard target.installSurfaceTree(tree, context: context) else { return }
+            if let focusView {
                 DispatchQueue.main.async {
-                    Ghostty.moveFocus(to: oldView, from: target.focusedSurface)
+                    Ghostty.moveFocus(to: focusView, from: target.focusedSurface)
                 }
             }
 
-            undoManager.registerUndo(
-                withTarget: target,
-                expiresAfter: target.undoExpiration
-            ) { target in
-                target.replaceSurfaceTree(
-                    newTree,
-                    moveFocusTo: newView,
-                    moveFocusFrom: target.focusedSurface,
-                    undoAction: undoAction)
-            }
+            target.registerSurfaceTreeUndo(
+                installing: otherTree, focusingTo: otherFocusView,
+                thenInstalling: tree, focusingTo: focusView,
+                context: context, undoAction: undoAction)
         }
     }
 
@@ -1266,6 +1310,13 @@ class BaseTerminalController: NSWindowController,
         if !surfaceTree.contains(where: { $0.needsConfirmQuit }) { return true }
 
         return false
+    }
+
+    /// Whether quitting would end something still running in this window. Not `windowCanBeClosedWithoutConfirmation()` inverted: a close kills a host-attached pane, but a quit hands it back to the daemon still running.
+    var needsConfirmAppQuit: Bool {
+        guard window != nil else { return false }
+        guard alert == nil else { return true }
+        return surfaceTree.contains(where: { $0.needsConfirmQuit && !$0.processPersistsAfterQuit })
     }
 
     // This is called when performClose is called on a window (NOT when close()

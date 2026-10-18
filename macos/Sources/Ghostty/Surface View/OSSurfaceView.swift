@@ -32,6 +32,26 @@ extension Ghostty {
         // The progress report (if any)
         @Published var progressReport: Action.ProgressReport?
 
+        // The most recently detected agent state for this surface's
+        // foreground process (coastty's own agent-detection port), or nil
+        // before the first detection check has run.
+        @Published var coasttyAgentState: Action.CoasttyAgentStateChange?
+
+        // `coasttyAgentState`'s state, defaulting to `.unknown` before the
+        // first detection check has run — the fallback every caller that
+        // just wants "the current state" actually wants, instead of each
+        // repeating `coasttyAgentState?.state ?? .unknown` itself.
+        var coasttyDetectedAgentState: Action.CoasttyAgentStateChange.State {
+            coasttyAgentState?.state ?? .unknown
+        }
+
+        // The agent detection found in this pane, if any. Kept separate from
+        // `coasttyDetectedAgentState` because a pane holds a known agent for
+        // the whole startup grace window while its state is still `.unknown`.
+        var coasttyDetectedAgent: Action.CoasttyAgentStateChange.Agent? {
+            coasttyAgentState?.agent
+        }
+
         // The currently active key tables. Empty if no tables are active.
         @Published var keyTables: [String] = []
 

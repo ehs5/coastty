@@ -342,6 +342,10 @@ extension Notification.Name {
     static let ghosttyMoveTab = Notification.Name("com.mitchellh.ghostty.moveTab")
     static let GhosttyMoveTabKey = ghosttyMoveTab.rawValue
 
+    /// Move Space. Has Space offset in the userinfo.
+    static let ghosttyMoveSpace = Notification.Name("com.mitchellh.ghostty.moveSpace")
+    static let GhosttyMoveSpaceKey = ghosttyMoveSpace.rawValue
+
     /// Close tab
     static let ghosttyCloseTab = Notification.Name("com.mitchellh.ghostty.closeTab")
 
@@ -350,6 +354,15 @@ extension Notification.Name {
 
     /// Close tabs to the right of the focused tab
     static let ghosttyCloseTabsOnTheRight = Notification.Name("com.mitchellh.ghostty.closeTabsOnTheRight")
+
+    /// Close Space
+    static let ghosttyCloseSpace = Notification.Name("com.mitchellh.ghostty.closeSpace")
+
+    /// Close other Spaces
+    static let ghosttyCloseOtherSpaces = Notification.Name("com.mitchellh.ghostty.closeOtherSpaces")
+
+    /// Close Spaces to the right of the focused Space
+    static let ghosttyCloseSpacesOnTheRight = Notification.Name("com.mitchellh.ghostty.closeSpacesOnTheRight")
 
     /// Close window
     static let ghosttyCloseWindow = Notification.Name("com.mitchellh.ghostty.closeWindow")
@@ -400,8 +413,23 @@ extension Ghostty.Notification {
     static let ghosttyGotoTab = Notification.Name("com.mitchellh.ghostty.gotoTab")
     static let GotoTabKey = ghosttyGotoTab.rawValue
 
+    /// Goto Space. Has Space index in the userinfo.
+    static let ghosttyGotoSpace = Notification.Name("com.mitchellh.ghostty.gotoSpace")
+    static let GotoSpaceKey = ghosttyGotoSpace.rawValue
+
     /// New tab. Has base surface config requested in userinfo.
     static let ghosttyNewTab = Notification.Name("com.mitchellh.ghostty.newTab")
+
+    /// New Space. No userinfo.
+    static let ghosttyNewSpace = Notification.Name("com.mitchellh.ghostty.newSpace")
+
+    /// Jump to the agent-bearing pane most needing attention. No userinfo.
+    static let ghosttyGotoUrgentAgent = Notification.Name("com.mitchellh.ghostty.gotoUrgentAgent")
+
+    /// Go to the previous/next agent-bearing pane, cycling the full list.
+    /// No userinfo - see `ghosttyGotoUrgentAgent`.
+    static let ghosttyPreviousAgent = Notification.Name("com.mitchellh.ghostty.previousAgent")
+    static let ghosttyNextAgent = Notification.Name("com.mitchellh.ghostty.nextAgent")
 
     /// New window. Has base surface config requested in userinfo.
     static let ghosttyNewWindow = Notification.Name("com.mitchellh.ghostty.newWindow")

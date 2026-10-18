@@ -40,6 +40,14 @@ const sync_reset_ms = 1000;
 /// The number of milliseconds between each movement during selection scrolling.
 const selection_scroll_ms = 15;
 
+/// How long the agent-detection timer waits before its first check, giving
+/// the pane's child process a moment to start.
+///
+/// ported-from: the `sleep(Duration::from_millis(50))` ahead of the
+/// detection task's loop in
+/// https://github.com/herdrdev/herdr/blob/master/src/pane.rs
+const agent_detect_initial_ms = 50;
+
 /// Allocator used for some state
 alloc: std.mem.Allocator,
 
@@ -72,6 +80,13 @@ coalesce_data: Coalesce = .{},
 sync_reset: xev.Timer,
 sync_reset_c: xev.Completion = .{},
 sync_reset_cancel_c: xev.Completion = .{},
+
+/// This timer re-runs agent detection on a pane that has gone quiet.
+/// Output-driven checks only fire while the PTY is producing bytes, so an
+/// agent sitting on a permission prompt would otherwise never be
+/// re-examined. See `Termio.tickAgentDetection`.
+agent_detect: xev.Timer,
+agent_detect_c: xev.Completion = .{},
 
 flags: packed struct {
     /// This is set to true only when an abnormal exit is detected. It
@@ -112,6 +127,10 @@ pub fn init(
     var sync_reset_h = try xev.Timer.init();
     errdefer sync_reset_h.deinit();
 
+    // This timer re-runs agent detection while the PTY is quiet.
+    var agent_detect_h = try xev.Timer.init();
+    errdefer agent_detect_h.deinit();
+
     return Thread{
         .alloc = alloc,
         .loop = loop,
@@ -119,6 +138,7 @@ pub fn init(
         .scroll = scroll_h,
         .coalesce = coalesce_h,
         .sync_reset = sync_reset_h,
+        .agent_detect = agent_detect_h,
     };
 }
 
@@ -128,6 +148,7 @@ pub fn deinit(self: *Thread) void {
     self.scroll.deinit();
     self.coalesce.deinit();
     self.sync_reset.deinit();
+    self.agent_detect.deinit();
     self.stop.deinit();
     self.loop.deinit();
 }
@@ -272,6 +293,14 @@ fn threadMain_(self: *Thread, io: *termio.Termio) !void {
     // Start the async handlers.
     mailbox.wakeup.wait(&self.loop, &self.wakeup_c, CallbackData, &cb, wakeupCallback);
     self.stop.wait(&self.loop, &self.stop_c, CallbackData, &cb, stopCallback);
+    self.agent_detect.run(
+        &self.loop,
+        &self.agent_detect_c,
+        agent_detect_initial_ms,
+        CallbackData,
+        &cb,
+        agentDetectCallback,
+    );
 
     // Run
     log.debug("starting IO thread", .{});
@@ -339,6 +368,7 @@ fn drainMailbox(
             .start_synchronized_output => self.startSynchronizedOutput(cb),
             .linefeed_mode => |v| self.flags.linefeed_mode = v,
             .focused => |v| try io.focusGained(data, v),
+            .coastty_viewed => |v| io.coasttyViewed(v),
             .write_small => |v| try io.queueWrite(
                 data,
                 v.data[0..v.len],
@@ -531,6 +561,40 @@ fn selectionScrollCallback(
         CallbackData,
         cb,
         selectionScrollCallback,
+    );
+
+    return .disarm;
+}
+
+/// Re-runs agent detection, then re-arms at whatever interval the detector
+/// asks for next - faster while an agent is identified or a release is
+/// pending, slower while the pane holds no agent at all.
+fn agentDetectCallback(
+    cb_: ?*CallbackData,
+    _: *xev.Loop,
+    _: *xev.Completion,
+    r: xev.Timer.RunError!void,
+) xev.CallbackAction {
+    _ = r catch |err| switch (err) {
+        error.Canceled => return .disarm,
+        else => {
+            log.warn("error during agent detection timer err={}", .{err});
+            return .disarm;
+        },
+    };
+
+    const cb = cb_ orelse return .disarm;
+    const self = cb.self;
+
+    const next_ms = cb.io.tickAgentDetection();
+
+    self.agent_detect.run(
+        &self.loop,
+        &self.agent_detect_c,
+        @intCast(next_ms),
+        CallbackData,
+        cb,
+        agentDetectCallback,
     );
 
     return .disarm;

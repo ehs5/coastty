@@ -264,12 +264,7 @@ language: ?[:0]const u8 = null,
 /// On Linux with GTK, font size is scaled according to both display-wide and
 /// text-specific scaling factors, which are often managed by your desktop
 /// environment (e.g. the GNOME display scale and large text settings).
-@"font-size": f32 = switch (builtin.os.tag) {
-    // On macOS we default a little bigger since this tends to look better. This
-    // is purely subjective but this is easy to modify.
-    .macos => 13,
-    else => 12,
-},
+@"font-size": f32 = 12,
 
 /// A repeatable configuration to set one or more font variations values for
 /// a variable font. A variable font is a single font, usually with a filename
@@ -594,7 +589,11 @@ language: ?[:0]const u8 = null,
 /// be fixed in a future update:
 ///
 ///   - macOS: titlebar tabs style is not updated when switching themes.
-theme: ?Theme = null,
+///
+/// coastty's default is its own `Coastty` theme, so a fresh install opens
+/// in the app's colours. `Coastty Light` ships alongside it;
+/// `light:Coastty Light,dark:Coastty` follows the system appearance.
+theme: ?Theme = .{ .light = "Coastty", .dark = "Coastty" },
 
 /// Background color for the window.
 /// Specified as either hex (`#RRGGBB` or `RRGGBB`) or a named X11 color.
@@ -2020,6 +2019,18 @@ keybind: Keybinds = .{},
 /// `window-padding-y = 2` will set both paddings to 2.
 @"window-padding-y": WindowPadding = .{ .top_left = 2, .bottom_right = 2 },
 
+/// coastty-specific, not part of upstream Ghostty: the gap (in points)
+/// between Space rows in the sidebar's Spaces section. Clamped to the
+/// 0-16 range in `finalize()`.
+@"space-row-gap": u8 = 4,
+
+/// coastty-specific, not part of upstream Ghostty: whether a pane routes
+/// its process through `coastty-host` so it keeps running - and can be
+/// reattached to - independent of coastty's own lifetime. Set to `false`
+/// to always spawn panes locally instead, exactly as coastty did before
+/// this existed.
+@"coastty-process-persistence": bool = true,
+
 /// The viewport dimensions are usually not perfectly divisible by the cell
 /// size. In this case, some extra padding on the end of a column and the bottom
 /// of the final row may exist. If this is `true`, then this extra padding
@@ -2545,7 +2556,7 @@ keybind: Keybinds = .{},
 
 /// When this is true, the default configuration file paths will be loaded.
 /// The default configuration file paths are currently only the XDG
-/// config path ($XDG_CONFIG_HOME/ghostty/config.ghostty).
+/// config path ($XDG_CONFIG_HOME/coastty/config.coastty).
 ///
 /// If this is false, the default configuration paths will not be loaded.
 /// This is targeted directly at using Ghostty from the CLI in a way
@@ -4097,13 +4108,14 @@ fn writeConfigTemplate(path: []const u8) !void {
 }
 
 /// Load configurations from the default configuration files. The default
-/// configuration file is at `$XDG_CONFIG_HOME/ghostty/config.ghostty`.
+/// configuration file is at `$XDG_CONFIG_HOME/coastty/config.coastty`.
 ///
-/// On macOS, `$HOME/Library/Application Support/$CFBundleIdentifier/`
-/// is also loaded.
+/// On macOS, `$HOME/Library/Application Support/com.espensteen.coastty/`
+/// is also loaded - coastty's own directory, not a real Ghostty
+/// installation's (see `build_config.config_app_id`).
 ///
 /// The legacy `config` file (without extension) is first loaded,
-/// then `config.ghostty`.
+/// then `config.coastty`.
 pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
     // Load XDG first
     const legacy_xdg_path = try file_load.legacyDefaultXdgPath(alloc);
@@ -4790,6 +4802,7 @@ pub fn finalize(self: *Config) !void {
     }
 
     self.@"faint-opacity" = std.math.clamp(self.@"faint-opacity", 0.0, 1.0);
+    self.@"space-row-gap" = std.math.clamp(self.@"space-row-gap", 0, 16);
 
     // Finalize key remapping set for efficient lookups
     self.@"key-remap".finalize();
@@ -6932,6 +6945,62 @@ pub const Keybinds = struct {
                     .performable = !builtin.target.os.tag.isDarwin(),
                 },
             );
+
+            // Control+Shift+N for goto Space N. NOT Cmd/Alt+Shift+N (what
+            // goto_tab above uses without Shift) - Cmd+Shift+3/4/5 are
+            // macOS system-wide screenshot shortcuts, intercepted by
+            // WindowServer before any app ever sees them, so goto_space
+            // would silently never fire on those three specific digits.
+            // Control+Shift+N has no such reservation on any platform.
+            const space_mods: inputpkg.Mods = .{
+                .ctrl = true,
+                .shift = true,
+            };
+            comptime var si: u21 = start;
+            inline while (si <= end) : (si += 1) {
+                // Same dual physical/unicode registration as goto tab
+                // above, for the same keyboard-layout robustness. Also
+                // mirrors goto tab's own `!isDarwin()` performable value,
+                // not a hardcoded `true` - performable triggers are
+                // excluded from the reverse mapping (see
+                // `Binding.Set.reverse`'s doc comment), which is what the
+                // sidebar's per-Space shortcut badge reads via
+                // `ghostty_config_trigger`. Hardcoding `true` here left the
+                // switch itself working but made the badge always resolve
+                // to nil.
+
+                try self.set.putFlags(
+                    alloc,
+                    .{
+                        .key = .{ .physical = @field(
+                            inputpkg.Key,
+                            std.fmt.comptimePrint("digit_{u}", .{si}),
+                        ) },
+                        .mods = space_mods,
+                    },
+                    .{ .goto_space = (si - start) + 1 },
+                    .{ .performable = !builtin.target.os.tag.isDarwin() },
+                );
+
+                try self.set.putFlags(
+                    alloc,
+                    .{
+                        .key = .{ .unicode = si },
+                        .mods = space_mods,
+                    },
+                    .{ .goto_space = (si - start) + 1 },
+                    .{ .performable = !builtin.target.os.tag.isDarwin() },
+                );
+            }
+            try self.set.putFlags(
+                alloc,
+                .{
+                    .key = .{ .unicode = '9' },
+                    .mods = space_mods,
+                },
+                .{ .last_space = {} },
+                .{ .performable = !builtin.target.os.tag.isDarwin() },
+            );
         }
 
         // Toggle fullscreen
@@ -7064,6 +7133,41 @@ pub const Keybinds = struct {
                 alloc,
                 .{ .key = .{ .unicode = 't' }, .mods = .{ .super = true } },
                 .{ .new_tab = {} },
+            );
+            // Control+Shift+T, not Cmd+Shift+T (already bound to undo
+            // above), for new Space.
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 't' }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .new_space = {} },
+            );
+            // Control+Shift+W, not Cmd+Shift+W (already bound to
+            // close_window above) or Cmd+Alt+W (close_tab), for close
+            // Space.
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'w' }, .mods = .{ .ctrl = true, .shift = true } },
+                .{ .close_space = .this },
+            );
+            // Cmd+U for the agent needing attention - "U" for "urgent",
+            // free of any existing tab/Space/split binding.
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'u' }, .mods = .{ .super = true } },
+                .{ .goto_urgent_agent = {} },
+            );
+            // Cmd+I / Cmd+Shift+I to cycle every agent-bearing pane -
+            // neither collides with Ctrl+Shift+I/Cmd+Option+I (Inspector)
+            // or any other default bind.
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'i' }, .mods = .{ .super = true, .shift = true } },
+                .{ .previous_agent = {} },
+            );
+            try self.set.put(
+                alloc,
+                .{ .key = .{ .unicode = 'i' }, .mods = .{ .super = true } },
+                .{ .next_agent = {} },
             );
             try self.set.put(
                 alloc,
@@ -10974,6 +11078,16 @@ test "compatibility: scrollback-limit renamed to bytes" {
         std.math.maxInt(usize),
         cfg.@"scrollback-limit-bytes".value,
     );
+}
+
+test "a fresh install opens in the Coastty theme at 12pt" {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+
+    try testing.expectEqualStrings("Coastty", cfg.theme.?.light);
+    try testing.expectEqualStrings("Coastty", cfg.theme.?.dark);
+    try testing.expectEqual(@as(f32, 12), cfg.@"font-size");
 }
 
 test "compatibility: gtk-single-instance desktop" {

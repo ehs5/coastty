@@ -3,6 +3,8 @@
 .swp
 *.log
 .DS_Store
+.claude/
+ONBOARDING.md
 .vscode/
 .direnv/
 .envrc.local
@@ -32,3 +34,6 @@ glad.zip
 vgcore.*
 
 /sprite_face_test*
+
+*.profraw
+/.scratch/

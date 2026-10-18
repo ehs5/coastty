@@ -428,6 +428,18 @@ fn actionCommands(action: Action.Key) []const Command {
             .description = i18n.N_("Open a new tab."),
         }},
 
+        .new_space => comptime &.{.{
+            .action = .new_space,
+            .title = i18n.N_("New Space"),
+            .description = i18n.N_("Open a new Space."),
+        }},
+
+        .goto_urgent_agent => comptime &.{.{
+            .action = .goto_urgent_agent,
+            .title = i18n.N_("Jump to Agent Needing Attention"),
+            .description = i18n.N_("Jump to the agent-bearing pane most needing attention, cycling to the next one on repeated use."),
+        }},
+
         .move_tab => comptime &.{
             .{
                 .action = .{ .move_tab = -1 },
@@ -446,6 +458,19 @@ fn actionCommands(action: Action.Key) []const Command {
             .title = i18n.N_("Move Tab to New Window"),
             .description = i18n.N_("Move the current tab to a new window."),
         }},
+
+        .move_space => comptime &.{
+            .{
+                .action = .{ .move_space = -1 },
+                .title = i18n.N_("Move Space Left"),
+                .description = i18n.N_("Move the current Space to the left."),
+            },
+            .{
+                .action = .{ .move_space = 1 },
+                .title = i18n.N_("Move Space Right"),
+                .description = i18n.N_("Move the current Space to the right."),
+            },
+        },
 
         .toggle_tab_overview => comptime &.{.{
             .action = .toggle_tab_overview,
@@ -612,6 +637,24 @@ fn actionCommands(action: Action.Key) []const Command {
             },
         },
 
+        .close_space => comptime &.{
+            .{
+                .action = .{ .close_space = .this },
+                .title = i18n.N_("Close Space"),
+                .description = i18n.N_("Close the current Space."),
+            },
+            .{
+                .action = .{ .close_space = .other },
+                .title = i18n.N_("Close Other Spaces"),
+                .description = i18n.N_("Close all Spaces in this window except the current one."),
+            },
+            .{
+                .action = .{ .close_space = .right },
+                .title = i18n.N_("Close Spaces to the Right"),
+                .description = i18n.N_("Close all Spaces to the right of the current one."),
+            },
+        },
+
         .close_window => comptime &.{.{
             .action = .close_window,
             .title = i18n.N_("Close Window"),
@@ -714,6 +757,7 @@ fn actionCommands(action: Action.Key) []const Command {
         .jump_to_prompt,
         .write_scrollback_file,
         .goto_tab,
+        .goto_space,
         .resize_split,
         .activate_key_table,
         .activate_key_table_once,
@@ -731,6 +775,11 @@ fn actionCommands(action: Action.Key) []const Command {
         .previous_tab,
         .next_tab,
         .last_tab,
+        .previous_space,
+        .next_space,
+        .last_space,
+        .previous_agent,
+        .next_agent,
         => comptime &.{},
 
         // No commands for obvious reasons

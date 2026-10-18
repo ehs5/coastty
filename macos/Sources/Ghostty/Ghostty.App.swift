@@ -481,6 +481,28 @@ extension Ghostty {
             return Unmanaged<SurfaceView>.fromOpaque(surface_ud).takeUnretainedValue()
         }
 
+        /// The number of coastty tabs `surfaceView`'s window currently owns,
+        /// or `0` if that window isn't managed by a `TerminalController` at
+        /// all (e.g. `QuickTerminalController`'s window, which has no tab
+        /// concept). Used by `gotoTab`/`moveTab` below to decide whether
+        /// those actions are performable — issue #12 (coastty repo), Round
+        /// 3: replaces a stale `window.tabGroup?.windows.count` check from
+        /// the native-tabbing era, which is always `nil` now that coastty
+        /// owns tab switching itself (`window.tabbingMode = .disallowed`).
+        static private func coasttyTabCount(for surfaceView: SurfaceView) -> Int {
+            guard let controller = surfaceView.window?.windowController as? TerminalController else { return 0 }
+            return controller.coasttyTabCount
+        }
+
+        /// The number of coastty Spaces `surfaceView`'s window currently
+        /// owns, or `0` if that window isn't managed by a
+        /// `TerminalController` at all — mirrors `coasttyTabCount(for:)`
+        /// above, used by `gotoSpace` below for the same reason.
+        static private func coasttySpaceCount(for surfaceView: SurfaceView) -> Int {
+            guard let controller = surfaceView.window?.windowController as? TerminalController else { return 0 }
+            return controller.coasttySpaceCount
+        }
+
         // MARK: Actions (macOS)
 
         static func action(_ app: ghostty_app_t, target: ghostty_target_s, action: ghostty_action_s) -> Bool {
@@ -511,6 +533,9 @@ extension Ghostty {
             case GHOSTTY_ACTION_CLOSE_TAB:
                 closeTab(app, target: target, mode: action.action.close_tab_mode)
 
+            case GHOSTTY_ACTION_CLOSE_SPACE:
+                closeSpace(app, target: target, mode: action.action.close_space_mode)
+
             case GHOSTTY_ACTION_CLOSE_WINDOW:
                 closeWindow(app, target: target)
 
@@ -520,8 +545,26 @@ extension Ghostty {
             case GHOSTTY_ACTION_MOVE_TAB:
                 return moveTab(app, target: target, move: action.action.move_tab)
 
+            case GHOSTTY_ACTION_MOVE_SPACE:
+                return moveSpace(app, target: target, move: action.action.move_space)
+
             case GHOSTTY_ACTION_GOTO_TAB:
                 return gotoTab(app, target: target, tab: action.action.goto_tab)
+
+            case GHOSTTY_ACTION_GOTO_SPACE:
+                return gotoSpace(app, target: target, space: action.action.goto_space)
+
+            case GHOSTTY_ACTION_NEW_SPACE:
+                newSpace(app, target: target)
+
+            case GHOSTTY_ACTION_GOTO_URGENT_AGENT:
+                return gotoUrgentAgent(app, target: target)
+
+            case GHOSTTY_ACTION_PREVIOUS_AGENT:
+                return previousAgent(app, target: target)
+
+            case GHOSTTY_ACTION_NEXT_AGENT:
+                return nextAgent(app, target: target)
 
             case GHOSTTY_ACTION_GOTO_SPLIT:
                 return gotoSplit(app, target: target, direction: action.action.goto_split)
@@ -615,6 +658,9 @@ extension Ghostty {
 
             case GHOSTTY_ACTION_PROGRESS_REPORT:
                 progressReport(app, target: target, v: action.action.progress_report)
+
+            case GHOSTTY_ACTION_AGENT_STATE_CHANGE:
+                coasttyAgentStateChange(app, target: target, v: action.action.agent_state_change)
 
             case GHOSTTY_ACTION_CONFIG_CHANGE:
                 configChange(app, target: target, v: action.action.config_change)
@@ -981,6 +1027,47 @@ extension Ghostty {
             }
         }
 
+        private static func closeSpace(_ app: ghostty_app_t, target: ghostty_target_s, mode: ghostty_action_close_space_mode_e) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("close spaces does nothing with an app target")
+                return
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+
+                switch mode {
+                case GHOSTTY_ACTION_CLOSE_SPACE_MODE_THIS:
+                    NotificationCenter.default.post(
+                        name: .ghosttyCloseSpace,
+                        object: surfaceView
+                    )
+                    return
+
+                case GHOSTTY_ACTION_CLOSE_SPACE_MODE_OTHER:
+                    NotificationCenter.default.post(
+                        name: .ghosttyCloseOtherSpaces,
+                        object: surfaceView
+                    )
+                    return
+
+                case GHOSTTY_ACTION_CLOSE_SPACE_MODE_RIGHT:
+                    NotificationCenter.default.post(
+                        name: .ghosttyCloseSpacesOnTheRight,
+                        object: surfaceView
+                    )
+                    return
+
+                default:
+                    assertionFailure()
+                }
+
+            default:
+                assertionFailure()
+            }
+        }
+
         private static func closeWindow(_ app: ghostty_app_t, target: ghostty_target_s) {
             switch target.tag {
             case GHOSTTY_TARGET_APP:
@@ -1170,13 +1257,44 @@ extension Ghostty {
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
                     // See gotoTab for notes on this check.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    guard self.coasttyTabCount(for: surfaceView) > 1 else { return false }
 
                     NotificationCenter.default.post(
                         name: .ghosttyMoveTab,
                         object: surfaceView,
                         userInfo: [
                             SwiftUI.Notification.Name.GhosttyMoveTabKey: Action.MoveTab(c: move),
+                        ]
+                    )
+
+                default:
+                    assertionFailure()
+                }
+
+                return true
+        }
+
+        private static func moveSpace(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            move: ghostty_action_move_space_s) -> Bool {
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    Ghostty.logger.warning("move space does nothing with an app target")
+                    return false
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                    // See gotoTab for notes on this check.
+                    guard self.coasttySpaceCount(for: surfaceView) > 1 else { return false }
+
+                    NotificationCenter.default.post(
+                        name: .ghosttyMoveSpace,
+                        object: surfaceView,
+                        userInfo: [
+                            SwiftUI.Notification.Name.GhosttyMoveSpaceKey: Action.MoveSpace(c: move),
                         ]
                     )
 
@@ -1200,9 +1318,22 @@ extension Ghostty {
                     guard let surface = target.target.surface else { return false }
                     guard let surfaceView = self.surfaceView(from: surface) else { return false }
 
-                    // Similar to goto_split (see comment there) about our performability,
-                    // we should make this more accurate later.
-                    guard (surfaceView.window?.tabGroup?.windows.count ?? 0) > 1 else { return false }
+                    // Issue #12 (coastty repo), Round 3: this used to check
+                    // `surfaceView.window?.tabGroup?.windows.count`, which
+                    // made sense back when a tab was a separate `NSWindow`
+                    // joined via `NSWindowTabGroup`. coastty now owns tabs
+                    // itself (`TerminalController.coasttyTabs`) and always
+                    // sets `window.tabbingMode = .disallowed`, so
+                    // `window.tabGroup` is always nil for every coastty
+                    // window — the old check was therefore always false,
+                    // silently dropping ⌘1-9/Control+Tab on the floor no
+                    // matter how many coastty tabs the window actually had.
+                    // `coasttyTabCount(for:)` falls back to the same
+                    // "not performable" result (`0`) for windows that
+                    // don't own coastty tabs at all (e.g. `QuickTerminalController`,
+                    // which never observes `ghosttyGotoTab` and has no tab
+                    // concept), so behavior there is unchanged.
+                    guard self.coasttyTabCount(for: surfaceView) > 1 else { return false }
 
                     NotificationCenter.default.post(
                         name: Notification.ghosttyGotoTab,
@@ -1211,6 +1342,125 @@ extension Ghostty {
                             Notification.GotoTabKey: tab,
                         ]
                     )
+
+                default:
+                    assertionFailure()
+                }
+
+                return true
+        }
+
+        private static func gotoSpace(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            space: ghostty_action_goto_space_e) -> Bool {
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    Ghostty.logger.warning("goto space does nothing with an app target")
+                    return false
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                    // See gotoTab for notes on this check.
+                    guard self.coasttySpaceCount(for: surfaceView) > 1 else { return false }
+
+                    NotificationCenter.default.post(
+                        name: Notification.ghosttyGotoSpace,
+                        object: surfaceView,
+                        userInfo: [
+                            Notification.GotoSpaceKey: space,
+                        ]
+                    )
+
+                default:
+                    assertionFailure()
+                }
+
+                return true
+        }
+
+        private static func newSpace(_ app: ghostty_app_t, target: ghostty_target_s) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                NotificationCenter.default.post(
+                    name: Notification.ghosttyNewSpace,
+                    object: nil,
+                    userInfo: [:]
+                )
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+
+                NotificationCenter.default.post(
+                    name: Notification.ghosttyNewSpace,
+                    object: surfaceView,
+                    userInfo: [:]
+                )
+
+            default:
+                assertionFailure()
+            }
+        }
+
+        /// Jumps to the agent-bearing pane most needing attention; only meaningful with a surface target, whose window owns the agent list.
+        private static func gotoUrgentAgent(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s) -> Bool {
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    Ghostty.logger.warning("jump to urgent agent does nothing with an app target")
+                    return false
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                    NotificationCenter.default.post(
+                        name: Notification.ghosttyGotoUrgentAgent,
+                        object: surfaceView
+                    )
+
+                default:
+                    assertionFailure()
+                }
+
+                return true
+        }
+
+        /// Goes to the previous agent-bearing pane, cycling the full list
+        /// (not just what needs attention). Only meaningful with a surface
+        /// target, whose window owns the agent list.
+        private static func previousAgent(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s) -> Bool {
+                postAgentCycleNotification(target: target, name: Notification.ghosttyPreviousAgent, actionName: "previous agent")
+        }
+
+        /// Same as `previousAgent`, the other direction.
+        private static func nextAgent(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s) -> Bool {
+                postAgentCycleNotification(target: target, name: Notification.ghosttyNextAgent, actionName: "next agent")
+        }
+
+        /// Shared surface-target dispatch for `previousAgent`/`nextAgent` - same shape as `gotoUrgentAgent`, just parameterized by which notification to post.
+        private static func postAgentCycleNotification(
+            target: ghostty_target_s,
+            name: SwiftUI.Notification.Name,
+            actionName: String) -> Bool {
+                switch target.tag {
+                case GHOSTTY_TARGET_APP:
+                    Ghostty.logger.warning("\(actionName) does nothing with an app target")
+                    return false
+
+                case GHOSTTY_TARGET_SURFACE:
+                    guard let surface = target.target.surface else { return false }
+                    guard let surfaceView = self.surfaceView(from: surface) else { return false }
+
+                    NotificationCenter.default.post(name: name, object: surfaceView)
 
                 default:
                     assertionFailure()
@@ -2107,6 +2357,29 @@ extension Ghostty {
                     } else {
                         surfaceView.progressReport = progressReport
                     }
+                }
+
+            default:
+                assertionFailure()
+            }
+        }
+
+        private static func coasttyAgentStateChange(
+            _ app: ghostty_app_t,
+            target: ghostty_target_s,
+            v: ghostty_action_agent_state_change_s) {
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                Ghostty.logger.warning("agent state change does nothing with an app target")
+                return
+
+            case GHOSTTY_TARGET_SURFACE:
+                guard let surface = target.target.surface else { return }
+                guard let surfaceView = self.surfaceView(from: surface) else { return }
+
+                let change = Ghostty.Action.CoasttyAgentStateChange(c: v)
+                DispatchQueue.main.async {
+                    surfaceView.coasttyAgentState = change
                 }
 
             default:

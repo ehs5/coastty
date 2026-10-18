@@ -1,7 +1,7 @@
 import AppKit
 
 class DockTilePlugin: NSObject, NSDockTilePlugIn {
-    // WARNING: An instance of this class is alive as long as Ghostty's icon is
+    // WARNING: An instance of this class is alive as long as coastty's icon is
     // in the doc (running or not!), so keep any state and processing to a
     // minimum to respect resource usage.
 
@@ -9,31 +9,37 @@ class DockTilePlugin: NSObject, NSDockTilePlugIn {
 
     // Separate defaults based on debug vs release builds so we can test icons
     // without messing up releases.
+    //
+    // coastty's own domain, not "com.mitchellh.ghostty": this plugin runs
+    // inside the Dock process, so it has to name the suite rather than use
+    // `.standard`, and naming upstream's meant a side-by-side Ghostty
+    // install's custom icon was read and painted onto coastty's dock tile,
+    // hiding coastty's real icon entirely.
     #if DEBUG
-    private let ghosttyUserDefaults = UserDefaults(suiteName: "com.mitchellh.ghostty.debug")
+    private let coasttyUserDefaults = UserDefaults(suiteName: "com.espensteen.coastty.debug")
     #else
-    private let ghosttyUserDefaults = UserDefaults(suiteName: "com.mitchellh.ghostty")
+    private let coasttyUserDefaults = UserDefaults(suiteName: "com.espensteen.coastty")
     #endif
 
     private var iconChangeObserver: Any?
 
     /// The primary NSDockTilePlugin function.
     func setDockTile(_ dockTile: NSDockTile?) {
-        // If no dock tile or no access to Ghostty defaults, we can't do anything.
-        guard let dockTile, let ghosttyUserDefaults else {
+        // If no dock tile or no access to coastty's defaults, we can't do anything.
+        guard let dockTile, let coasttyUserDefaults else {
             iconChangeObserver = nil
             return
         }
 
         // Try to restore the previous icon on launch.
-        iconDidChange(ghosttyUserDefaults.appIcon, dockTile: dockTile)
+        iconDidChange(coasttyUserDefaults.appIcon, dockTile: dockTile)
 
         // Setup a new observer for when the icon changes so we can update. This message
-        // is sent by the primary Ghostty app.
+        // is sent by the primary coastty app.
         iconChangeObserver = DistributedNotificationCenter
             .default()
-            .publisher(for: .ghosttyIconDidChange)
-            .map { [weak self] _ in self?.ghosttyUserDefaults?.appIcon }
+            .publisher(for: .coasttyIconDidChange)
+            .map { [weak self] _ in self?.coasttyUserDefaults?.appIcon }
             .receive(on: DispatchQueue.global())
             .sink { [weak self] newIcon in self?.iconDidChange(newIcon, dockTile: dockTile) }
     }

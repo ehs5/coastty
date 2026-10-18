@@ -3,8 +3,10 @@ import SwiftUI
 struct AboutView: View {
     @Environment(\.openURL) var openURL
 
-    private let githubURL = URL(string: "https://github.com/ghostty-org/ghostty")
-    private let docsURL = URL(string: "https://ghostty.org/docs")
+    private let githubURL = URL(string: "https://github.com/ehs5/coastty")
+
+    /// coastty is built on Ghostty, and configuration is Ghostty's - its docs live there.
+    private let ghosttyURL = URL(string: "https://ghostty.org")
 
     /// Read the commit from the bundle.
     private var build: String? { Bundle.main.infoDictionary?["CFBundleVersion"] as? String }
@@ -30,15 +32,8 @@ struct AboutView: View {
             self = .other(version)
         }
 
-        var url: URL? {
-            switch self {
-            case .stable(let version):
-                let slug = version.replacingOccurrences(of: ".", with: "-")
-                return URL(string: "https://ghostty.org/docs/install/release-notes/\(slug)")
-            default:
-                return nil
-            }
-        }
+        /// coastty publishes no release notes yet, so no version links anywhere.
+        var url: URL? { nil }
     }
 
     private var versionConfig: VersionConfig { VersionConfig(version: version) }
@@ -80,10 +75,10 @@ struct AboutView: View {
 
             VStack(alignment: .center, spacing: 32) {
                 VStack(alignment: .center, spacing: 8) {
-                    Text("Ghostty")
+                    Text("Coastty")
                         .bold()
                         .font(.title)
-                    Text("Fast, native, feature-rich terminal \nemulator pushing modern features.")
+                    Text("A terminal for working with coding agents.\nBuilt on Ghostty.")
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .font(.caption)
@@ -114,13 +109,13 @@ struct AboutView: View {
                 .frame(maxWidth: .infinity)
 
                 HStack(spacing: 8) {
-                    if let url = docsURL {
-                        Button("Docs") {
+                    if let url = githubURL {
+                        Button("GitHub") {
                             openURL(url)
                         }
                     }
-                    if let url = githubURL {
-                        Button("GitHub") {
+                    if let url = ghosttyURL {
+                        Button("Ghostty") {
                             openURL(url)
                         }
                     }

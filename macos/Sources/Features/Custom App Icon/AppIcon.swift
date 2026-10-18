@@ -93,7 +93,7 @@ actor AppIconUpdater {
         // Notify DockTilePlugin to update dock icon
         DistributedNotificationCenter.default()
             .postNotificationName(
-                .ghosttyIconDidChange,
+                .coasttyIconDidChange,
                 object: nil,
                 userInfo: nil,
                 deliverImmediately: true,

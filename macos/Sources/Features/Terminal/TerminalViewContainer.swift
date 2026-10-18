@@ -86,7 +86,47 @@ class TerminalViewContainer: NSView {
 
 extension BaseTerminalController {
     var terminalViewContainer: TerminalViewContainer? {
-        window?.contentView as? TerminalViewContainer
+        // The common case: the container is the window's content view
+        // directly (every terminal window except coastty's sidebar-bearing
+        // `TerminalController` windows, where it's nested a few levels
+        // down inside the sidebar split view + tab bar pane instead — see
+        // `CoasttyTerminalSplitViewController`/`CoasttyTerminalPaneView`).
+        if let direct = window?.contentView as? TerminalViewContainer {
+            return direct
+        }
+
+        return window?.contentView?.firstDescendant(ofType: TerminalViewContainer.self)
+    }
+}
+
+private extension NSView {
+    /// Breadth-first search for the first descendant of the given type.
+    /// Used to find `TerminalViewContainer` regardless of how many plain
+    /// wrapper views (coastty's split view, tab bar pane, etc.) sit
+    /// between it and the window's content view.
+    ///
+    /// Deliberately breadth-first, not depth-first: for coastty's
+    /// sidebar-bearing windows, `TerminalViewContainer` sits a few shallow
+    /// levels down inside the terminal split-item's own pane, while its
+    /// sibling branch — the sidebar's SwiftUI hosting hierarchy — nests far
+    /// deeper and can never contain a `TerminalViewContainer` at all. A
+    /// depth-first walk would fully explore whichever sibling comes first
+    /// (the sidebar, added before the terminal item) before ever reaching
+    /// the shallow match; breadth-first finds the shallow match without
+    /// paying for that wasted traversal into irrelevant SwiftUI internals.
+    func firstDescendant<T: NSView>(ofType type: T.Type) -> T? {
+        var frontier = subviews
+        while !frontier.isEmpty {
+            var nextFrontier: [NSView] = []
+            for view in frontier {
+                if let match = view as? T {
+                    return match
+                }
+                nextFrontier.append(contentsOf: view.subviews)
+            }
+            frontier = nextFrontier
+        }
+        return nil
     }
 }
 

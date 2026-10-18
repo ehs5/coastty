@@ -148,6 +148,28 @@ extension Ghostty {
             return ghostty_surface_process_exited(surface)
         }
 
+        /// coastty-host's id for this surface's pane, or "" when it was spawned locally and the daemon has nothing to name.
+        var hostPaneID: String {
+            guard let surface = self.surface else { return "" }
+
+            // Comfortably above a pane id's real ceiling: a filesystem path (PATH_MAX 1024) plus a short suffix.
+            var buffer = [CChar](repeating: 0, count: 2048)
+            let length = ghostty_surface_host_pane_id(surface, &buffer, buffer.count)
+            guard length > 0 else { return "" }
+            return String(decoding: buffer[0..<length].map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        }
+
+        /// True if this pane runs on coastty-host, so quitting hands it back rather than killing it. Closing the tab, Space or window it's in still ends it.
+        var processPersistsAfterQuit: Bool {
+            guard let surface = self.surface else { return false }
+            return ghostty_surface_process_persists(surface)
+        }
+
+        /// This surface as the close paths see it, for assembling a `KILL` request.
+        var closingPane: CoasttyPaneLifecycle.Pane {
+            .init(hostID: hostPaneID, hasRunningProcess: needsConfirmQuit)
+        }
+
         // Returns the inspector instance for this surface, or nil if the
         // surface has been closed or no inspector is active.
         var inspector: Ghostty.Inspector? {

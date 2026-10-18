@@ -747,7 +747,15 @@ extension Ghostty {
                                 return try envVars.withUnsafeMutableBufferPointer { buffer in
                                     config.env_vars = buffer.baseAddress
                                     config.env_var_count = environmentVariables.count
-                                    return try body(&config)
+
+                                    // The view's id is persisted with the restored
+                                    // session, so handing it down is what lets this
+                                    // pane reattach to its own coastty-host process
+                                    // after a relaunch.
+                                    return try view.id.uuidString.withCString { cPaneID in
+                                        config.coastty_pane_id = cPaneID
+                                        return try body(&config)
+                                    }
                                 }
                             }
                         }

@@ -17,6 +17,7 @@ const global = @import("global.zig");
 const apprt = @import("apprt.zig");
 const internal_os = @import("os/main.zig");
 const windows = @import("os/windows.zig");
+const layout_commands = @import("host/layout_commands.zig");
 
 // Some comptime assertions that our C API depends on.
 comptime {
@@ -145,6 +146,21 @@ pub export fn ghostty_cli_try_action() void {
     });
 
     posix.system.exit(0);
+}
+
+/// Runs a layout command (`coastty tab new`, ...) and exits if `argv` is
+/// one; otherwise returns and the app starts as usual. Called before
+/// `ghostty_init`, so nothing of the app - its config, its own CLI actions -
+/// reads the command's arguments first.
+pub export fn ghostty_cli_try_layout_command(argc: c_int, argv: [*][*:0]u8) void {
+    // A bare `coastty` typed in a terminal wants help, not the app attached to that terminal; Finder, `open` and launchers give no terminal on stdout.
+    if (argc < 2 and std.c.isatty(posix.STDOUT_FILENO) == 1) {
+        layout_commands.printHelp();
+        posix.system.exit(0);
+    }
+    if (argc < 2) return;
+    if (!layout_commands.handles(std.mem.sliceTo(argv[1], 0))) return;
+    posix.system.exit(layout_commands.main(argv[1..@intCast(argc)]));
 }
 
 /// Return metadata about Ghostty, such as version, build mode, etc.

@@ -77,6 +77,11 @@ pub const StreamHandler = struct {
     /// this to determine if we need to default the window title.
     seen_title: bool = false,
 
+    /// The most recent OSC 9;4 (ConEmu-style) progress report seen, if any.
+    /// Read by agent detection alongside the window title as one of the
+    /// two OSC-derived side channels it scrapes.
+    last_progress_report: ?terminal.osc.Command.ProgressReport = null,
+
     pub const Stream = terminal.Stream(StreamHandler);
 
     /// True if we have tmux control mode built in.
@@ -1462,6 +1467,7 @@ pub const StreamHandler = struct {
 
     /// Display a GUI progress report.
     fn progressReport(self: *StreamHandler, report: terminal.osc.Command.ProgressReport) void {
+        self.last_progress_report = report;
         self.surfaceMessageWriter(.{ .progress_report = report });
     }
 };

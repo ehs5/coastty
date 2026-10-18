@@ -85,6 +85,54 @@ pub fn build(b: *std.Build) !void {
     // Ghostty executable, the actual runnable Ghostty program.
     const exe = try buildpkg.GhosttyExe.init(b, &config, &deps);
 
+    // coastty-host: a headless daemon that keeps a pane's pty-owned
+    // process alive independent of the GUI's lifetime. A separate
+    // executable rather than a GUI feature flag, composed from the same
+    // renderer-agnostic core pieces (`Terminal`, `Pty`, `Command`) the
+    // main exe uses, so it needs nothing new added to SharedDeps.
+    //
+    // Declared here (rather than scoped to the block below) so the
+    // macOS app bundling step further down can copy its output into
+    // `Coastty.app` - see the `bundle_host` step near `macos_app.install`.
+    var host_exe: ?*std.Build.Step.Compile = null;
+    if (!config.emit_lib_vt) {
+        host_exe = b.addExecutable(.{
+            .name = "coastty-host",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main_host.zig"),
+                .target = config.target,
+                .optimize = config.optimize,
+            }),
+        });
+        _ = try deps.add(host_exe.?);
+        b.installArtifact(host_exe.?);
+
+        // Importing the daemon's files in `main_host.zig` is what makes
+        // their tests run at all, but it drags in every core file they
+        // build on - and with it the core's whole test suite, which
+        // `ghostty-test` already runs. Keep this binary to the daemon's
+        // own tests unless the caller asked for something specific.
+        const host_test_filters: []const []const u8 =
+            if (test_filters.len > 0) test_filters else &.{"host."};
+        const host_test = b.addTest(.{
+            .name = "coastty-host-test",
+            .filters = host_test_filters,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main_host.zig"),
+                .target = config.baselineTarget(b.graph.io),
+                .optimize = .Debug,
+            }),
+        });
+        _ = try deps.add(host_test);
+        // `main_host.zig` pulls the daemon's own files in so their tests
+        // actually run, and through them the core files they build on -
+        // including ones whose tests reach the generated `ghostty.h`
+        // bindings, so this test binary needs them too.
+        addGhosttyH(b, host_test.root_module, config.baselineTarget(b.graph.io), .Debug);
+        const host_test_run = b.addRunArtifact(host_test);
+        test_step.dependOn(&host_test_run.step);
+    }
+
     // Ghostty docs
     const docs = try buildpkg.GhosttyDocs.init(b, &deps);
     if (config.emit_docs) {
@@ -240,6 +288,21 @@ pub fn build(b: *std.Build) !void {
         );
         if (config.emit_macos_app) {
             macos_app.install();
+
+            // Bundle coastty-host alongside the app's own binary so the
+            // GUI can find and start it at a well-known, relative path
+            // (see `HostBackend.hostBinaryPath`) without needing it on
+            // `PATH` - which a GUI app launched from Finder won't have.
+            if (host_exe) |host| {
+                const bundle_host = b.addSystemCommand(&.{"cp"});
+                bundle_host.addFileArg(host.getEmittedBin());
+                bundle_host.addArg(b.getInstallPath(
+                    .prefix,
+                    "Coastty.app/Contents/MacOS/coastty-host",
+                ));
+                bundle_host.step.dependOn(&macos_app.copy.step);
+                b.getInstallStep().dependOn(&bundle_host.step);
+            }
         }
     }
 

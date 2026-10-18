@@ -806,6 +806,9 @@ pub const Application = extern struct {
             .check_for_updates,
             .undo,
             .redo,
+            .goto_space,
+            .new_space,
+            .close_space,
             => {
                 log.warn("unimplemented action={}", .{action});
                 return false;

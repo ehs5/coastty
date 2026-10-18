@@ -9,6 +9,11 @@ const log = std.log.scoped(.config);
 
 /// Default path for the XDG home configuration file. Returned value
 /// must be freed by the caller.
+///
+/// Uses "coastty", not "ghostty" - coastty's own config lives at its own
+/// path, separate from a real Ghostty installation's (see
+/// `build_config.config_app_id`'s doc comment for the same reasoning on
+/// the macOS Application Support side).
 pub fn defaultXdgPath(alloc: Allocator) ![]const u8 {
     var environ_map = try global.environMap();
     defer environ_map.deinit();
@@ -16,7 +21,7 @@ pub fn defaultXdgPath(alloc: Allocator) ![]const u8 {
         global.io(),
         alloc,
         &environ_map,
-        .{ .subdir = "ghostty/config.ghostty" },
+        .{ .subdir = "coastty/config.coastty" },
     );
 }
 
@@ -29,7 +34,7 @@ pub fn legacyDefaultXdgPath(alloc: Allocator) ![]const u8 {
         global.io(),
         alloc,
         &environ_map,
-        .{ .subdir = "ghostty/config" },
+        .{ .subdir = "coastty/config" },
     );
 }
 
@@ -61,7 +66,7 @@ pub fn preferredXdgPath(alloc: Allocator) ![]const u8 {
 /// Default path for the macOS Application Support configuration file.
 /// Returned value must be freed by the caller.
 pub fn defaultAppSupportPath(alloc: Allocator) ![]const u8 {
-    return try internal_os.macos.appSupportDir(alloc, "config.ghostty");
+    return try internal_os.macos.appSupportDir(alloc, "config.coastty");
 }
 
 /// Ghostty <1.3.0 default path for the macOS Application Support

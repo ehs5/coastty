@@ -2,6 +2,9 @@ import AppKit
 import Cocoa
 import GhosttyKit
 
+// A layout command (`coastty tab new`) runs and exits here, before anything of the app reads its arguments.
+ghostty_cli_try_layout_command(CommandLine.argc, CommandLine.unsafeArgv)
+
 // Initialize Ghostty global state. We do this once right away because the
 // CLI APIs require it and it lets us ensure it is done immediately for the
 // rest of the app.
@@ -13,7 +16,7 @@ if ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) != GHOSTTY_SUCCE
     case .cli, .zig_run:
         let stderrHandle = FileHandle.standardError
         stderrHandle.write(
-            "Ghostty failed to initialize! If you're executing Ghostty from the command line\n" +
+            "Coastty failed to initialize! If you're executing Coastty from the command line\n" +
             "then this is usually because an invalid action or multiple actions were specified.\n" +
             "Actions start with the `+` character.\n\n" +
             "View all available actions by running `ghostty +help`.\n")

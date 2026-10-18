@@ -57,6 +57,21 @@ pub const i18n: bool = config.i18n;
 /// avoid it in Zig coe as much as possible.
 pub const bundle_id = "com.mitchellh.ghostty";
 
+/// coastty's own identity for locating ITS config file specifically -
+/// deliberately kept separate from `bundle_id` above (which many unrelated
+/// things read: i18n catalog lookups, macOS unified-logging subsystem
+/// names, etc. - changing that one would have side effects far outside
+/// config-file resolution, e.g. breaking translation lookups against the
+/// bundled `.mo` catalogs, which are still named after Ghostty's own
+/// bundle ID).
+///
+/// This is used by `os.macos.appSupportDir` (whose only two callers are
+/// both in `config/file_load.zig`) so that coastty reads/writes its
+/// config from its own `~/Library/Application Support/com.espensteen.coastty/`
+/// folder instead of silently sharing (and potentially colliding with) a
+/// real Ghostty installation's own `com.mitchellh.ghostty` folder.
+pub const config_app_id = "com.espensteen.coastty";
+
 /// True if we should have "slow" runtime safety checks. The initial motivation
 /// for this was terminal page/pagelist integrity checks. These were VERY
 /// slow but very thorough. But they made it so slow that the terminal couldn't

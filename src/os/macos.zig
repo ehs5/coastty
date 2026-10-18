@@ -18,9 +18,13 @@ pub fn isAtLeastVersion(major: i64, minor: i64, patch: i64) bool {
 
 pub const AppSupportDirError = Allocator.Error || error{AppleAPIFailed};
 
-/// Return the path to the application support directory for Ghostty
-/// with the given sub path joined. This allocates the result using the
-/// given allocator.
+/// Return the path to the application support directory for coastty's
+/// own config file with the given sub path joined. This allocates the
+/// result using the given allocator.
+///
+/// Deliberately uses `build_config.config_app_id`, not `build_config.bundle_id` -
+/// see that constant's own doc comment. This function's only callers are
+/// both in `config/file_load.zig`.
 pub fn appSupportDir(
     alloc: Allocator,
     sub_path: []const u8,
@@ -28,7 +32,7 @@ pub fn appSupportDir(
     return try commonDir(
         alloc,
         .NSApplicationSupportDirectory,
-        &.{ build_config.bundle_id, sub_path },
+        &.{ build_config.config_app_id, sub_path },
     );
 }
 

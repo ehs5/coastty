@@ -227,9 +227,17 @@ pub fn focusedSurface(self: *const App) ?*Surface {
 
 /// Returns true if confirmation is needed to quit the app. It is up to
 /// the apprt to call this.
+///
+/// A pane whose process runs on coastty-host is skipped: quitting hands
+/// it back to the daemon rather than killing it, so warning about a
+/// process that will keep running would just be untrue. Closing a tab,
+/// Space or window is the destructive action, and confirms separately
+/// (via `Surface.needsConfirmQuit`, which those paths go through).
 pub fn needsConfirmQuit(self: *const App) bool {
     for (self.surfaces.items) |v| {
-        if (v.core().needsConfirmQuit()) return true;
+        const surface = v.core();
+        if (surface.processPersistsAfterQuit()) continue;
+        if (surface.needsConfirmQuit()) return true;
     }
 
     return false;

@@ -1256,6 +1256,19 @@ const Subprocess = struct {
         try command.signal(c.SIGHUP, true);
     }
 
+    /// The pid of the process this pane launched - the pane's shell, unless
+    /// something has `exec`'d over it. Agent detection needs it to tell
+    /// "the foreground job is just this pane's shell again" from "some
+    /// other process group is in front", which is how an agent exiting is
+    /// distinguished from an agent that merely stopped producing output.
+    pub fn paneChildPid(self: *Subprocess) ?u32 {
+        const process = self.process orelse return null;
+        return switch (process) {
+            .fork_exec => |cmd| if (cmd.pid) |pid| @intCast(pid) else null,
+            else => null,
+        };
+    }
+
     /// Get information about the process(es) running within the subprocess.
     /// Returns `null` if there was an error getting the information or the
     /// information is not available on a particular platform.
@@ -1840,7 +1853,11 @@ pub const ReadThread = struct {
 /// may not be allocated and args may or may not be allocated (or copied).
 /// Pointers in the return value may point to pointers in the command
 /// struct.
-fn execCommand(
+///
+/// Public so `termio.HostBackend` can resolve the same default-shell/
+/// login-shell argv for a pane it hands off to coastty-host, instead of
+/// re-deriving (and risking drifting from) this platform-specific logic.
+pub fn execCommand(
     alloc: Allocator,
     command: configpkg.Command,
     comptime passwdpkg: type,
@@ -2061,6 +2078,10 @@ fn appendEnvAlways(
 /// not available on a particular platform.
 pub fn getProcessInfo(self: *Exec, comptime info: ProcessInfo) ?ProcessInfo.Type(info) {
     return self.subprocess.getProcessInfo(info);
+}
+
+pub fn paneChildPid(self: *Exec) ?u32 {
+    return self.subprocess.paneChildPid();
 }
 
 test "execCommand darwin: shell command" {

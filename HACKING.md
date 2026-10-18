@@ -1,17 +1,12 @@
-# Developing Ghostty
+# Developing coastty
 
-This document describes the technical details behind Ghostty's development.
-If you'd like to open any pull requests or would like to implement new features
-into Ghostty, please make sure to read our ["Contributing to Ghostty"](CONTRIBUTING.md)
-document first.
+This guide is inherited from Ghostty. The build commands, logging and Swift tooling below apply to coastty as written. The Linux, Nix and translation sections do not: coastty is macOS only, and that code is kept only so it keeps compiling.
 
-To start development on Ghostty, you need to build Ghostty from a Git checkout,
-which is very similar in process to [building Ghostty from a source tarball](http://ghostty.org/docs/install/build). One key difference is that obviously
-you need to clone the Git repository instead of unpacking the source tarball:
+Before opening a pull request, read [CONTRIBUTING.md](CONTRIBUTING.md). To start, clone coastty:
 
 ```shell
-git clone https://github.com/ghostty-org/ghostty
-cd ghostty
+git clone https://github.com/ehs5/coastty
+cd coastty
 ```
 
 > [!NOTE]
