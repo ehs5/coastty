@@ -411,7 +411,7 @@ extension Ghostty {
 
         var macosCustomIcon: String {
             #if os(macOS)
-            let defaultValue = NSString("~/.config/ghostty/Ghostty.icns").expandingTildeInPath
+            let defaultValue = NSString("~/.config/coastty/Coastty.icns").expandingTildeInPath
             guard let config = self.config else { return defaultValue }
             var v: UnsafePointer<Int8>?
             let key = "macos-custom-icon"

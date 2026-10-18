@@ -5,8 +5,7 @@ struct AboutView: View {
 
     private let githubURL = URL(string: "https://github.com/ehs5/coastty")
 
-    /// coastty is built on Ghostty, and configuration is Ghostty's - its docs live there.
-    private let ghosttyURL = URL(string: "https://ghostty.org")
+    private let websiteURL = URL(string: "https://coastty.dev")
 
     /// Read the commit from the bundle.
     private var build: String? { Bundle.main.infoDictionary?["CFBundleVersion"] as? String }
@@ -71,7 +70,11 @@ struct AboutView: View {
 
     var body: some View {
         VStack(alignment: .center) {
-            CyclingIconView()
+            ghosttyIconImage()
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 128)
+                .accessibilityLabel("Coastty Application Icon")
 
             VStack(alignment: .center, spacing: 32) {
                 VStack(alignment: .center, spacing: 8) {
@@ -109,13 +112,13 @@ struct AboutView: View {
                 .frame(maxWidth: .infinity)
 
                 HStack(spacing: 8) {
-                    if let url = githubURL {
-                        Button("GitHub") {
+                    if let url = websiteURL {
+                        Button("Coastty") {
                             openURL(url)
                         }
                     }
-                    if let url = ghosttyURL {
-                        Button("Ghostty") {
+                    if let url = githubURL {
+                        Button("GitHub") {
                             openURL(url)
                         }
                     }
