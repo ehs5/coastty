@@ -7,6 +7,7 @@ struct LicensesView: View {
         let title: String
         let text: String
 
+        /// Reads the licence text for `resource` up front, so the view never touches the bundle while drawing.
         init(resource: String, title: String) {
             self.id = resource
             self.title = title

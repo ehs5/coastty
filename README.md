@@ -36,7 +36,7 @@ The commands change layout and nothing else. No command can type into a pane, st
 
 ## Install
 
-Coastty runs on macOS Golden Gate. Install it with Homebrew:
+Coastty runs on macOS Golden Gate. Release builds start with Coastty 0.1.0, which is not out yet, so for now you [build it from source](#building-from-source). Once it is out, install it with Homebrew:
 
 ```sh
 brew install --cask ehs5/coastty/coastty
@@ -44,7 +44,7 @@ brew install --cask ehs5/coastty/coastty
 
 Homebrew also puts the `coastty` command on your `PATH`, and `brew upgrade` keeps Coastty up to date. To install by hand instead, download `Coastty.dmg` from [GitHub Releases](https://github.com/ehs5/coastty/releases) and drag Coastty into Applications.
 
-An upgrade stops the running `coastty-host`, so every pane restarts once, as after restarting your Mac: your Spaces and tabs come back, and each shell starts again in the directory it was in.
+The first launch after an upgrade stops the `coastty-host` the previous version left running and starts the new one, so every pane restarts once, as after restarting your Mac: your Spaces and tabs come back, and each shell starts again in the directory it was in.
 
 ### The first launch
 

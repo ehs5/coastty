@@ -123,6 +123,11 @@ check_publishable() {
     fail "write the release notes in ${notes#"$repo/"} first"
   fi
 
+  # A logged-out or offline gh would pass the release check below and fail only after the whole build
+  if ! gh auth status >/dev/null 2>&1; then
+    fail "gh cannot reach GitHub as a logged-in user; check gh auth status"
+  fi
+
   if gh release view "$tag" >/dev/null 2>&1; then
     fail "a GitHub release for $tag already exists"
   fi
@@ -183,7 +188,7 @@ print_cask_values() {
 
 # Uploads the dmg to a draft release for the tag, which stays unpublished until it is reviewed on GitHub.
 publish() {
-  local tag=$1 version=$2 dmg=$3 notes=$4
+  local tag=$1 dmg=$2 notes=$3 version=${1#v}
 
   gh release create "$tag" "$dmg" --draft --target "$(git -C "$repo" rev-parse HEAD)" --title "Coastty $version" --notes-file "$notes"
 }
@@ -233,7 +238,7 @@ main() {
     return
   fi
 
-  publish "$tag" "$version" "$dmg" "$notes"
+  publish "$tag" "$dmg" "$notes"
   echo "$build" >"$last_build_file"
   echo "release: draft release $tag created; review and publish it on GitHub"
   echo "release: then update Casks/coastty.rb and commit it with dist/macos/last-build-number"

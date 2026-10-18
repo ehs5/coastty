@@ -5,6 +5,7 @@ import SwiftUI
 class LicensesController: NSWindowController {
     static let shared = LicensesController()
 
+    /// Builds the window in code; it stays alive when closed so `show()` can bring it back.
     init() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
@@ -20,6 +21,7 @@ class LicensesController: NSWindowController {
         super.init(window: window)
     }
 
+    /// Unused: the window is never loaded from a nib.
     required init?(coder: NSCoder) {
         fatalError("LicensesController is built in code, never from a nib")
     }
@@ -27,5 +29,20 @@ class LicensesController: NSWindowController {
     /// Brings the window to the front, reopening it if it was closed.
     func show() {
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Closes the window for the Close menu item and its ⌘W, as About does.
+    @IBAction func close(_ sender: Any) {
+        window?.performClose(sender)
+    }
+
+    /// Closes the window for the Close Window menu item, as About does.
+    @IBAction func closeWindow(_ sender: Any) {
+        window?.performClose(sender)
+    }
+
+    /// Closes the window when Escape is pressed, as About does.
+    @objc func cancel(_ sender: Any?) {
+        close()
     }
 }

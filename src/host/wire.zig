@@ -52,6 +52,13 @@
 //!     daemon kills everything else in its registry. The set difference is
 //!     computed here rather than by the client fetching `LIST` and diffing
 //!     it locally. An empty id list means "keep nothing".
+//!   VERSION\n
+//!     -> OK <coastty-version>\n
+//!     The coastty version the daemon was built as: `0.1.0` for a release,
+//!     `0.1.0-dev` for any other build. The app stops a daemon of another
+//!     version before it starts its own, so after an upgrade it never keeps
+//!     talking to a daemon whose binary the upgrade replaced. A daemon from
+//!     before this request answers `ERR unknown command`.
 //!
 //! The model (see `Model.zig`): the Spaces, tabs and pane membership the
 //! daemon owns, which every client reads from and writes to the same way.
@@ -261,6 +268,15 @@ pub const max_header_len = 4096;
 /// The event protocol this build speaks. The Mac app ships with the daemon
 /// and must speak exactly this.
 pub const protocol_version: u32 = 2;
+
+/// The coastty version this build is, which `VERSION` answers with.
+pub const coastty_version: []const u8 = @import("build_options").coastty_version_string;
+
+/// Whether a daemon that answered `VERSION` with `answer` was built as another coastty version than `ours`. One from before `VERSION` existed answers with an error, so it counts as another version.
+pub fn isOtherVersion(answer: []const u8, ours: []const u8) bool {
+    if (!std.mem.startsWith(u8, answer, "OK ")) return true;
+    return !std.mem.eql(u8, answer["OK ".len..], ours);
+}
 
 /// The oldest protocol an outside client may speak. It does not move, so a
 /// client written against it keeps working against every later daemon.
@@ -587,6 +603,13 @@ pub fn parseEnvBody(alloc: Allocator, body: []const u8) !std.process.Environ.Map
         try map.put(field[0..eq], field[eq + 1 ..]);
     }
     return map;
+}
+
+test "isOtherVersion tells a daemon of this version from any other" {
+    try std.testing.expect(!isOtherVersion("OK 0.1.0", "0.1.0"));
+    try std.testing.expect(isOtherVersion("OK 0.1.0", "0.1.1"));
+    try std.testing.expect(isOtherVersion("OK 0.1.0-dev", "0.1.0"));
+    try std.testing.expect(isOtherVersion("ERR unknown command", "0.1.0"));
 }
 
 test "parseEnvBody splits KEY=VALUE pairs and skips malformed ones" {

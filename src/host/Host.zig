@@ -239,7 +239,7 @@ fn retireLegacyHost(host: *Host) void {
     };
 
     // Its SIGTERM handler flushes the model before exiting, so read it only after.
-    if (waitForProcessGone(host.io, pid, legacy_exit_timeout_ms)) return;
+    if (access.waitForProcessGone(host.io, pid, legacy_exit_timeout_ms)) return;
     log.warn("the coastty host (pid {d}) on the old socket has not exited; its model writes may race this one's", .{pid});
 }
 
@@ -308,6 +308,8 @@ fn handleConnection(host: *Host, conn: net.Stream) void {
         host.handleSweep(conn, &it);
     } else if (std.mem.eql(u8, cmd, "MODEL")) {
         host.handleModel(conn);
+    } else if (std.mem.eql(u8, cmd, "VERSION")) {
+        respondOkVersion(host.io, conn);
     } else if (std.mem.eql(u8, cmd, "FOCUSED")) {
         host.handleFocused(conn);
     } else if (std.mem.eql(u8, cmd, "WINDOWS")) {
@@ -1639,6 +1641,13 @@ fn respondOkId(io: Io, conn: net.Stream, id: []const u8, outcome: wire.CreateOut
     wire.writeHeaderLine(&w.interface, "OK {s} {s}", .{ id, outcome.token() }) catch {};
 }
 
+/// `VERSION`: the coastty version this daemon was built as.
+fn respondOkVersion(io: Io, conn: net.Stream) void {
+    var wbuf: [128]u8 = undefined;
+    var w = conn.writer(io, &wbuf);
+    wire.writeHeaderLine(&w.interface, "OK {s}", .{wire.coastty_version}) catch {};
+}
+
 fn respondOkCount(io: Io, conn: net.Stream, count: usize) void {
     var wbuf: [64]u8 = undefined;
     var w = conn.writer(io, &wbuf);
@@ -2205,6 +2214,23 @@ test "CREATE, KILL and SWEEP without the token are refused and leave the panes a
     try testing.expectEqual(@as(u32, 1), host.panes.count());
 }
 
+test "VERSION answers with this build's coastty version and needs no token" {
+    var host: Host = .init(testing.allocator, testing.io);
+    defer deinitTestHost(&host);
+
+    const tc = try TestConn.open(&host, "version");
+    defer tc.finish();
+    var wbuf: [64]u8 = undefined;
+    var w = tc.client.writer(testing.io, &wbuf);
+    try wire.writeHeaderLine(&w.interface, "VERSION", .{});
+
+    var rbuf: [wire.max_header_len]u8 = undefined;
+    var r = tc.client.reader(testing.io, &rbuf);
+    const answer = (try wire.readHeader(testing.allocator, &r.interface)) orelse return error.NoResponse;
+    defer testing.allocator.free(answer);
+    try testing.expect(!wire.isOtherVersion(answer, wire.coastty_version));
+}
+
 test "SUBSCRIBE as the app needs the token" {
     var host: Host = .init(testing.allocator, testing.io);
     defer deinitTestHost(&host);
@@ -2518,27 +2544,6 @@ test "a pane survives every client disconnecting, and a later CREATE reattaches 
     try testing.expectEqual(@as(usize, 1), host.panes.count());
 }
 
-/// Whether `pid` still names a process this host could signal. The kill
-/// tests use it to assert against the real OS process rather than the
-/// daemon's own bookkeeping about it.
-fn processExists(pid: std.posix.pid_t) bool {
-    // Signal 0 is the "does this process exist and may I signal it" probe;
-    // it has no enum name because it isn't a real signal.
-    std.posix.kill(pid, @enumFromInt(0)) catch return false;
-    return true;
-}
-
-/// Spins until `pid` is gone or `timeout_ms` elapses, so neither a test nor
-/// a retiring daemon depends on how fast the process gets around to exiting.
-fn waitForProcessGone(io: Io, pid: std.posix.pid_t, timeout_ms: u64) bool {
-    var waited: u64 = 0;
-    while (waited < timeout_ms) : (waited += 10) {
-        if (!processExists(pid)) return true;
-        std.Io.sleep(io, .fromMilliseconds(10), .awake) catch {};
-    }
-    return !processExists(pid);
-}
-
 fn panePid(host: *Host, id: []const u8) !std.posix.pid_t {
     host.mutex.lockUncancelable(host.io);
     defer host.mutex.unlock(host.io);
@@ -2558,14 +2563,14 @@ test "KILL terminates the pane's real process and drops it from the registry" {
     tc_create.finish();
 
     const pid = try panePid(&host, id);
-    try testing.expect(processExists(pid));
+    try testing.expect(access.processExists(pid));
 
     const tc_kill = try TestConn.open(&host, "kill-send");
     defer tc_kill.finish();
     try testing.expectEqual(@as(usize, 1), try sendIdCommand(tc_kill.client, &tc_kill.token, "KILL", &.{id}));
 
     try testing.expectEqual(@as(usize, 0), host.panes.count());
-    try testing.expect(waitForProcessGone(testing.io, pid, 1000));
+    try testing.expect(access.waitForProcessGone(testing.io, pid, 1000));
 }
 
 test "KILL takes several ids in one request" {
@@ -2614,7 +2619,7 @@ test "KILL forces out a process that ignores SIGTERM" {
     defer tc_kill.finish();
     try testing.expectEqual(@as(usize, 1), try sendIdCommand(tc_kill.client, &tc_kill.token, "KILL", &.{id}));
 
-    try testing.expect(!processExists(pid));
+    try testing.expect(!access.processExists(pid));
 }
 
 test "SWEEP kills exactly the panes nobody claimed" {
@@ -2640,8 +2645,8 @@ test "SWEEP kills exactly the panes nobody claimed" {
 
     try testing.expectEqual(@as(usize, 1), host.panes.count());
     try testing.expect(host.panes.get(id_keep) != null);
-    try testing.expect(waitForProcessGone(testing.io, dropped_pid, 1000));
-    try testing.expect(processExists(kept_pid));
+    try testing.expect(access.waitForProcessGone(testing.io, dropped_pid, 1000));
+    try testing.expect(access.processExists(kept_pid));
 }
 
 test "SWEEP with no ids kills every pane" {
