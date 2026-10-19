@@ -203,13 +203,13 @@ main() {
 
   check_clean_tree
 
-  # The tag names the version; VERSION must agree so dev builds count up from the same number
+  # The tag names the version; COASTTY_VERSION must agree so dev builds count up from the same number
   tag=$(release_tag)
   version=${tag#v}
-  file_version=$(tr -d '[:space:]' <"$repo/VERSION")
+  file_version=$(tr -d '[:space:]' <"$repo/COASTTY_VERSION")
 
   if [[ $version != "$file_version" ]]; then
-    fail "tag $tag does not match VERSION ($file_version)"
+    fail "tag $tag does not match COASTTY_VERSION ($file_version)"
   fi
 
   check_tag_unpublished "$tag"

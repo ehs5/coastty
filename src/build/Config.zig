@@ -255,7 +255,7 @@ pub fn init(
         []const u8,
         "coastty-version",
         "Coastty's version for a release build. " ++
-            "If not specified, the VERSION file's version with a -dev suffix is used.",
+            "If not specified, the COASTTY_VERSION file's version with a -dev suffix is used.",
     );
 
     const coastty_file_version = try std.SemanticVersion.parse(coasttyVersion);
@@ -308,7 +308,7 @@ pub fn init(
                 });
 
                 if (!std.mem.eql(u8, tag, expected)) {
-                    @panic("tagged releases must be in vX.Y.Z format matching VERSION");
+                    @panic("tagged releases must be in vX.Y.Z format matching COASTTY_VERSION");
                 }
 
                 break :version .{

@@ -17,7 +17,7 @@ pub const ReleaseChannel = BuildConfig.ReleaseChannel;
 pub const version = options.app_version;
 pub const version_string = options.app_version_string;
 
-/// Coastty's own version, from the VERSION file or a release build's tag.
+/// Coastty's own version, from the COASTTY_VERSION file or a release build's tag.
 pub const coastty_version_string = options.coastty_version_string;
 
 /// The release channel for this build.
