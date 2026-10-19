@@ -14,11 +14,11 @@ struct LicensesView: View {
             self.text = Self.read(resource)
         }
 
-        /// Reads a licence from the bundle's resources, where only the release script puts them.
+        /// Reads a licence from the bundle's resources, where the Xcode project copies them in every build.
         private static func read(_ resource: String) -> String {
             guard let url = Bundle.main.url(forResource: resource, withExtension: nil),
                   let text = try? String(contentsOf: url, encoding: .utf8) else {
-                return "Not included in this build. Release builds carry it in the app's resources."
+                return "Not included in this build: the app's resources hold no \(resource) file."
             }
 
             return text

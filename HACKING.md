@@ -92,14 +92,24 @@ produced.
 
 `dist/macos/release.sh` builds every release the same way. It needs Zig 0.16, Xcode, Node.js 20 or newer for `npx`, and for publishing an authenticated `gh`.
 
-1. Set `COASTTY_VERSION` to the new version and write the release notes in `dist/macos/release-notes/v<version>.md`.
+1. Set `COASTTY_VERSION` to the new version and write the release notes in `dist/macos/release-notes/v<version>.md`. If the daemon or protocol version changed since the last release (see below), say so at the top of the notes.
 2. Commit both and push the commit.
 3. Tag the commit locally: `git tag v<version>`.
-4. Run `dist/macos/release.sh` to check the build locally. It builds with `-Doptimize=ReleaseFast`, stamps the version and build number into `Info.plist`, copies `LICENSE` and herdr's licence into the app's resources, re-signs the app ad hoc and wraps it in `zig-out/release/Coastty.dmg` with [create-dmg](https://github.com/sindresorhus/create-dmg) through `npx`. It prints the DMG's SHA-256 and the values for `Casks/coastty.rb`, and uploads nothing.
+4. Run `dist/macos/release.sh` to check the build locally. It builds with `-Doptimize=ReleaseFast`, stamps the version and build number into `Info.plist`, checks that `LICENSE` and herdr's licence are in the app's resources (the Xcode project copies them into every build), re-signs the app ad hoc and wraps it in `zig-out/release/Coastty.dmg` with [create-dmg](https://github.com/sindresorhus/create-dmg) through `npx`. It prints the DMG's SHA-256 and the values for `Casks/coastty.rb`, and uploads nothing.
 5. Run `dist/macos/release.sh --publish` to build again and upload `Coastty.dmg` to a draft GitHub release for the tag, with the release notes as its text. Review the draft on GitHub and publish it there; GitHub creates the tag when you do.
 6. Put the printed `version` and `sha256` into `Casks/coastty.rb`, and commit it together with `dist/macos/last-build-number`, which `--publish` updates. The cask lives in this repo until the tap `ehs5/homebrew-coastty` exists; from then on, update the tap's copy instead.
 
-The script refuses to run on a working tree with uncommitted changes, without exactly one `vX.Y.Z` tag on `HEAD`, when the tag does not match `COASTTY_VERSION`, or when the tag or a release for it already exists on GitHub. `RELEASE_DIR` changes where the app and DMG go, and `ZIG` picks the zig binary.
+The script refuses to run on a working tree with uncommitted changes, without exactly one `vX.Y.Z` tag on `HEAD`, when the tag does not match `COASTTY_VERSION`, or when the tag or a release for it already exists on GitHub. It also refuses a release that changed anything under `src/host/` since the last release tag without bumping the daemon version or the protocol version; run it with `--no-daemon-bump` when the change is one users need not restart their panes for. `RELEASE_DIR` changes where the app and DMG go, and `ZIG` picks the zig binary.
+
+### The daemon and protocol versions
+
+Upgrading the app never restarts `coastty-host` on its own, since that ends every pane's process. Two numbers in `src/host/wire.zig` decide what a new app does with the daemon it finds running ([ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md)):
+
+- Bump `daemon_version` when the daemon's code changes in a way users should get: a fix, a new feature, anything the old daemon gets wrong. The new app keeps the old daemon and asks the user to restart it. Leave it alone for refactors, tests and comments, and release those with `--no-daemon-bump`.
+- Bump `protocol_version` only when the app and the daemon can no longer talk: a request or event changed in a way the other side cannot read. The new app restarts the old daemon without asking and explains afterwards, so avoid it; add a request or a capability instead where you can.
+- `COASTTY_VERSION` changes with every release and has no effect on the daemon.
+
+To try the dialogs by hand, bump `daemon_version` (or `protocol_version`) in a local build, open some panes in the build before it, quit it and open the new one.
 
 Until coastty has an Apple Developer ID the app is signed ad hoc and the DMG not at all, so users must approve the first launch in System Settings; the README describes the steps.
 

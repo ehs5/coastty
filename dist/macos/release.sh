@@ -5,6 +5,9 @@
 #   dist/macos/release.sh            build Coastty.dmg and print the cask values, uploading nothing
 #   dist/macos/release.sh --publish  the same, then upload Coastty.dmg to a draft GitHub release
 #
+# A release that changed src/host/ since the last one must bump daemon_version in src/host/wire.zig, so users are offered the new daemon.
+# --no-daemon-bump releases anyway, for a change users need not restart their panes for.
+#
 # Environment:
 #   RELEASE_DIR  where the stamped Coastty.app and Coastty.dmg are written (default: zig-out/release)
 #   ZIG          the zig binary to build with (default: zig on PATH)
@@ -138,7 +141,61 @@ check_publishable() {
   fi
 }
 
-# Builds the app into $1 and stamps version $2 and build $3 into it, with the licence texts its code requires.
+# Prints the value of the u32 constant $2 in src/host/wire.zig at commit $1, or 0 when it has none there.
+wire_constant_at() {
+  local line
+  line=$(git -C "$repo" show "$1:src/host/wire.zig" | grep -E "^pub const $2: u32 = [0-9]+;$" || true)
+
+  if [[ -z $line ]]; then
+    echo 0
+    return
+  fi
+
+  line=${line##*= }
+  echo "${line%;}"
+}
+
+# Refuses a release that changed src/host/ since the last release without bumping the daemon version, unless $1 is yes.
+check_daemon_version() {
+  local allow_no_bump=$1 previous daemon_before daemon_now protocol_before protocol_now
+  previous=$(git -C "$repo" describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)
+
+  # The first release has nothing to compare with
+  if [[ -z $previous ]]; then
+    return
+  fi
+
+  # Nothing in the daemon's own code changed
+  if git -C "$repo" diff --quiet "$previous" HEAD -- src/host/; then
+    return
+  fi
+
+  daemon_before=$(wire_constant_at "$previous" daemon_version)
+  daemon_now=$(wire_constant_at HEAD daemon_version)
+
+  if ((daemon_now > daemon_before)); then
+    echo "release: daemon version $daemon_before -> $daemon_now; say so up front in the release notes"
+    return
+  fi
+
+  # A new protocol restarts the daemon on its own, so it needs no daemon version bump on top
+  protocol_before=$(wire_constant_at "$previous" protocol_version)
+  protocol_now=$(wire_constant_at HEAD protocol_version)
+
+  if ((protocol_now > protocol_before)); then
+    echo "release: protocol version $protocol_before -> $protocol_now; say so up front in the release notes"
+    return
+  fi
+
+  if [[ $allow_no_bump == yes ]]; then
+    echo "release: src/host/ changed since $previous with daemon version $daemon_now unchanged, as --no-daemon-bump allows"
+    return
+  fi
+
+  fail "src/host/ changed since $previous but daemon_version in src/host/wire.zig is still $daemon_now; bump it, or run with --no-daemon-bump when users need not restart their panes for this change"
+}
+
+# Builds the app into $1 and stamps version $2 and build $3 into it.
 build_app() {
   local app=$1 version=$2 build=$3 plist
 
@@ -154,9 +211,12 @@ build_app() {
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
 
-  # MIT wants Ghostty's notice in all copies and Apache 2.0 wants herdr's licence given to every recipient, so both ship inside the app
-  cp "$repo/LICENSE" "$app/Contents/Resources/LICENSE"
-  cp "$repo/src/agent-detection/LICENSE-herdr" "$app/Contents/Resources/LICENSE-herdr"
+  # MIT wants Ghostty's notice in all copies and Apache 2.0 wants herdr's licence given to every recipient; the Xcode project copies both into every build
+  for license in LICENSE LICENSE-herdr; do
+    if [[ ! -f "$app/Contents/Resources/$license" ]]; then
+      fail "the built app has no $license in its resources"
+    fi
+  done
 
   # Editing the bundle breaks its signature; sign it again ad hoc until there is a Developer ID
   codesign --force --sign - --preserve-metadata=entitlements,requirements,flags,runtime "$app"
@@ -195,11 +255,15 @@ publish() {
 
 # Builds, stamps and packages the release for the tag on HEAD, and uploads it with --publish.
 main() {
-  local mode=${1:-} tag version file_version build app dmg sha notes
+  local publish=no allow_no_bump=no arg tag version file_version build app dmg sha notes
 
-  if [[ -n $mode && $mode != "--publish" ]]; then
-    fail "unknown argument '$mode'; the only option is --publish"
-  fi
+  for arg in "$@"; do
+    case $arg in
+      --publish) publish=yes ;;
+      --no-daemon-bump) allow_no_bump=yes ;;
+      *) fail "unknown argument '$arg'; the options are --publish and --no-daemon-bump" ;;
+    esac
+  done
 
   check_clean_tree
 
@@ -213,9 +277,10 @@ main() {
   fi
 
   check_tag_unpublished "$tag"
+  check_daemon_version "$allow_no_bump"
   notes="$notes_dir/$tag.md"
 
-  if [[ $mode == "--publish" ]]; then
+  if [[ $publish == yes ]]; then
     check_publishable "$tag" "$notes"
   fi
 
@@ -233,7 +298,7 @@ main() {
   echo "release: SHA-256 $sha"
   print_cask_values "$version" "$sha"
 
-  if [[ $mode != "--publish" ]]; then
+  if [[ $publish != yes ]]; then
     echo "release: nothing uploaded; run with --publish to create the draft release"
     return
   fi

@@ -30,6 +30,7 @@ const wire = @import("../host/wire.zig");
 const agent_detection = @import("../agent-detection/main.zig");
 const paths = @import("../host/paths.zig");
 const access = @import("../host/access.zig");
+const upgrade = @import("../host/upgrade.zig");
 
 const log = std.log.scoped(.io_host);
 
@@ -329,11 +330,151 @@ fn resolveCwd(configured: ?[:0]const u8) ?[]const u8 {
     return if (home.len > 0) home else null;
 }
 
+/// What the app tells the user about the daemon it found at launch, once its windows are up.
+pub const DaemonNotice = enum(c_int) {
+    /// Nothing to tell: the daemon was kept as it is, or this app started it.
+    none,
+    /// The running daemon has an older daemon version; restarting it is the user's choice.
+    update_available,
+    /// The running daemon spoke another protocol, so it was restarted and every pane started again.
+    restarted,
+    /// The running daemon spoke another protocol and could not be stopped.
+    restart_failed,
+
+    test "ghostty.h DaemonNotice" {
+        try lib.checkGhosttyHEnum(DaemonNotice, "GHOSTTY_HOST_DAEMON_NOTICE_");
+    }
+};
+
+var daemon_notice: std.atomic.Value(DaemonNotice) = .init(.none);
+
+/// Set once the daemon running at launch has been compared with this app, so a later `ensureRunning` never does it again.
+var daemon_checked: std.atomic.Value(bool) = .init(false);
+
+/// How long a daemon being restarted gets to write its model out and exit.
+const stop_timeout_ms = 5000;
+
+/// Returns what the user should be told about the daemon found at launch, once: a second call returns `none`.
+pub fn takeDaemonNotice() DaemonNotice {
+    return daemon_notice.swap(.none, .acq_rel);
+}
+
+/// The daemon's answer to `VERSION` on `conn`, or null when it gave none. Caller owns it.
+fn askVersions(alloc: Allocator, io: Io, conn: net.Stream) ?[]u8 {
+    var wbuf: [64]u8 = undefined;
+    var w = conn.writer(io, &wbuf);
+    wire.writeHeaderLine(&w.interface, "VERSION", .{}) catch return null;
+
+    var rbuf: [wire.max_header_len]u8 = undefined;
+    var r = conn.reader(io, &rbuf);
+    return wire.readHeader(alloc, &r.interface) catch null;
+}
+
+/// Ends the daemon at `pid` with SIGTERM, which has it write its model out first, and waits for it to exit. False when it could not be stopped.
+fn stopDaemon(io: Io, pid: ?posix.pid_t) bool {
+    const daemon_pid = pid orelse {
+        log.warn("coastty-host's pid is unknown, so it cannot be stopped", .{});
+        return false;
+    };
+
+    posix.kill(daemon_pid, .TERM) catch |err| {
+        log.warn("could not stop coastty-host (pid {d}): {t}", .{ daemon_pid, err });
+        return false;
+    };
+
+    if (access.waitForProcessGone(io, daemon_pid, stop_timeout_ms)) return true;
+    log.warn("coastty-host (pid {d}) has not exited", .{daemon_pid});
+    return false;
+}
+
+/// Compares the daemon already running with this app, restarting it only when the two cannot talk, and notes what the user should be told.
+fn checkRunningDaemon(alloc: Allocator, io: Io) void {
+    const path = paths.socketPath(alloc) catch return;
+    defer alloc.free(path);
+
+    // Nothing running: the daemon this app starts is its own
+    const conn = access.connect(io, path) orelse return;
+    const pid = access.peerPid(conn);
+    const answer = askVersions(alloc, io, conn);
+    conn.close(io);
+
+    // Without an answer nothing is known about it, and a restart would end every pane for nothing
+    const text = answer orelse return;
+    defer alloc.free(text);
+    const found = upgrade.parseAnswer(text) orelse {
+        log.warn("coastty-host answered VERSION with '{s}'; keeping it", .{text});
+        return;
+    };
+
+    switch (upgrade.decide(found, upgrade.ours)) {
+        .keep => {},
+        .ask => {
+            log.info("coastty-host is daemon version {d} and this app's is {d}; keeping it until the user restarts it", .{ found.daemon, upgrade.ours.daemon });
+            daemon_notice.store(.update_available, .release);
+        },
+        .restart => {
+            log.info("coastty-host speaks protocol {d} and this app {d}; restarting it", .{ found.protocol, upgrade.ours.protocol });
+            const notice: DaemonNotice = if (stopDaemon(io, pid)) .restarted else .restart_failed;
+            daemon_notice.store(notice, .release);
+        },
+    }
+}
+
+/// Stops the running daemon for a restart the user chose. The app relaunches next, and the daemon its launch starts brings every Space and tab back with fresh shells. False when it could not be stopped.
+pub fn stopForRestart(alloc: Allocator, io: Io) bool {
+    const path = paths.socketPath(alloc) catch return false;
+    defer alloc.free(path);
+
+    // Already gone: the relaunch starts the new one all the same
+    const conn = access.connect(io, path) orelse return true;
+    const pid = access.peerPid(conn);
+    conn.close(io);
+    return stopDaemon(io, pid);
+}
+
+/// Opens the app at `app_path` again once this process has exited, for the relaunch that finishes a daemon restart.
+/// A shell waits for the exit, since LaunchServices only brings a still-running app to the front.
+pub fn relaunchAfterExit(alloc: Allocator, app_path: []const u8) void {
+    relaunchAfterExitOrFail(alloc, app_path) catch |err| {
+        log.warn("could not relaunch {s}: {}", .{ app_path, err });
+    };
+}
+
+fn relaunchAfterExitOrFail(alloc: Allocator, app_path: []const u8) !void {
+    const pid = try std.fmt.allocPrintSentinel(alloc, "{d}", .{std.c.getpid()}, 0);
+    defer alloc.free(pid);
+    const app = try alloc.dupeZ(u8, app_path);
+    defer alloc.free(app);
+
+    const script = "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open \"$2\"";
+    const args = [_][:0]const u8{ "/bin/sh", "-c", script, "sh", pid, app };
+    var cmd: Command = .{
+        .path = "/bin/sh",
+        .args = &args,
+        .env = null,
+        .cwd = null,
+        .stdin = null,
+        .stdout = null,
+        .stderr = null,
+        .os_pre_exec = null,
+        .rt_pre_exec = null,
+        .rt_pre_exec_info = .{},
+        .rt_post_fork = null,
+        .rt_post_fork_info = .{},
+        .data = null,
+    };
+
+    // Not waited for: it outlives this process, which is about to exit
+    try cmd.start(alloc);
+}
+
 /// Starts the daemon if it isn't already running, and reports whether one
 /// is reachable afterwards. The GUI calls this before asking for the
 /// model: the daemon owns the Spaces and tabs a window is built from, so
 /// waiting for a pane to need one would be backwards.
+/// The first call compares a daemon already running with this app, and restarts it when the two cannot talk; see `host/upgrade.zig`.
 pub fn ensureRunning(alloc: Allocator, io: Io) bool {
+    if (!daemon_checked.swap(true, .acq_rel)) checkRunningDaemon(alloc, io);
     const conn = connectOrStartHost(alloc, io) catch return false;
     conn.close(io);
     startAppSubscription(alloc, io);

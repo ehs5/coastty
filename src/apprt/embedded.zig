@@ -1714,6 +1714,24 @@ pub const CAPI = struct {
         return termio.HostBackend.ensureRunning(global.alloc(), global.io());
     }
 
+    /// What the user should be told about the daemon found at launch,
+    /// once: a daemon update to restart for, or a restart that could not
+    /// be avoided. Call after `ghostty_host_ensure_running`.
+    export fn ghostty_host_take_daemon_notice() termio.HostBackend.DaemonNotice {
+        return termio.HostBackend.takeDaemonNotice();
+    }
+
+    /// Stops coastty-host for a restart the user chose, before the app
+    /// quits and relaunches. False when it could not be stopped.
+    export fn ghostty_host_stop_for_restart() bool {
+        return termio.HostBackend.stopForRestart(global.alloc(), global.io());
+    }
+
+    /// Opens the app at `app_path` again once this process has exited.
+    export fn ghostty_host_relaunch_after_exit(app_path: [*:0]const u8) void {
+        termio.HostBackend.relaunchAfterExit(global.alloc(), std.mem.span(app_path));
+    }
+
     /// Writes the daemon's model into `buf` as JSON and returns its
     /// length - or the length needed, when it does not fit, so the caller
     /// can retry larger. Zero means no daemon answered.

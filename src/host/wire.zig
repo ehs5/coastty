@@ -52,6 +52,11 @@
 //!     daemon kills everything else in its registry. The set difference is
 //!     computed here rather than by the client fetching `LIST` and diffing
 //!     it locally. An empty id list means "keep nothing".
+//!   VERSION\n
+//!     -> OK <protocol-version> <daemon-version>\n
+//!     The two numbers that decide what the app does with a daemon it
+//!     finds running (see `upgrade.zig`). Needs no token. A daemon from
+//!     before this request answers `ERR unknown command`.
 //!
 //! The model (see `Model.zig`): the Spaces, tabs and pane membership the
 //! daemon owns, which every client reads from and writes to the same way.
@@ -260,7 +265,12 @@ pub const max_header_len = 4096;
 
 /// The event protocol this build speaks. The Mac app ships with the daemon
 /// and must speak exactly this.
+/// Bump it only when the app and the daemon can no longer talk: an app that finds a daemon speaking another one has to restart it, ending every pane's process.
 pub const protocol_version: u32 = 2;
+
+/// The daemon's own version, which `VERSION` answers with. Bumped when the daemon's code changes in a way users should get; an app that finds an older one running keeps it and asks before restarting it, since a restart ends every pane's process.
+/// The app's own version never enters into it, so an app-only release leaves running panes alone.
+pub const daemon_version: u32 = 1;
 
 /// The oldest protocol an outside client may speak. It does not move, so a
 /// client written against it keeps working against every later daemon.

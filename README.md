@@ -60,6 +60,16 @@ xattr -dr com.apple.quarantine /Applications/Coastty.app
 
 macOS asks again after each `brew upgrade`. Every build carries a new ad-hoc signature, so Homebrew cannot carry your approval over to the new version, and says so with a "signer changed" warning.
 
+### Updating
+
+`brew upgrade` installs a new Coastty, or download the new `Coastty.dmg` and replace the app. Your shells and agents run in `coastty-host`, a background service that keeps running when you quit or replace the app. What an update does to them depends on what changed:
+
+- **Most updates keep every pane running.** When only the app changed, the new Coastty connects to the background service already running and every pane is where you left it.
+- **Some update the background service too, and ask first.** When a release changes the background service, Coastty keeps using the one already running and asks whether to restart it, with **Restart now** and **Later**. Restarting ends every running shell and agent; your Spaces and tabs come back, each with a fresh shell in the directory it was in, and Coastty reopens. Choose **Later** to finish your work first; Coastty asks again at its next launch, and restarting your Mac updates it too.
+- **A few cannot keep the old background service.** When a release changes how the app and the background service talk to each other, the new Coastty cannot use the old one, so it restarts it when it opens and then tells you it did. Your Spaces and tabs come back with fresh shells, as above.
+
+The release notes say up front when a release updates the background service or restarts it. [ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md) records why it works this way.
+
 ### Building from source
 
 You need [Zig 0.16](https://ziglang.org/download/) and a recent Xcode.

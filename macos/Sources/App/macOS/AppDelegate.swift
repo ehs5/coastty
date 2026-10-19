@@ -375,10 +375,12 @@ class AppDelegate: NSObject,
                     self?.undoManager.enableUndoRegistration()
                     Self.coasttySweepUnclaimedHostPanes()
                     TerminalController.coasttySeedHostModel()
+                    DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
                 }
                 if !isRestoring {
                     _ = TerminalController.newWindow(ghostty)
                     undoManager.enableUndoRegistration()
+                    DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
                 }
             }
         }
@@ -395,6 +397,11 @@ class AppDelegate: NSObject,
         // If we've already accepted to install an update, then we don't need to
         // confirm quit. The user is already expecting the update to happen.
         if updateController.shouldTerminateWithoutWarning {
+            return .terminateNow
+        }
+
+        // The user chose to restart the daemon, which already ended every pane; the relaunch brings them back.
+        if CoasttyDaemonUpdate.relaunchOnTerminate {
             return .terminateNow
         }
 
@@ -430,6 +437,8 @@ class AppDelegate: NSObject,
 
         // Flush now rather than waiting on the debounce timer.
         CoasttySessionSaveScheduler.shared.flushNow()
+
+        CoasttyDaemonUpdate.relaunchIfRestarting()
     }
 
     /// This is called when the application is already open and someone double-clicks the icon
