@@ -96,9 +96,8 @@ produced.
 2. Commit both and push the commit.
 3. Tag the commit locally: `git tag v<version>`.
 4. Run `dist/macos/release.sh` to check the build locally. It builds with `-Doptimize=ReleaseFast`, stamps the version and build number into `Info.plist`, copies `LICENSE` and herdr's licence into the app's resources, re-signs the app ad hoc and wraps it in `zig-out/release/Coastty.dmg` with [create-dmg](https://github.com/sindresorhus/create-dmg) through `npx`. It prints the DMG's SHA-256 and the values for `Casks/coastty.rb`, and uploads nothing.
-5. Check the upgrade: with the previous release running and some panes open, quit it, install the new `Coastty.app` over it and open it. Every pane restarts once and the Spaces and tabs come back.
-6. Run `dist/macos/release.sh --publish` to build again and upload `Coastty.dmg` to a draft GitHub release for the tag, with the release notes as its text. Review the draft on GitHub and publish it there; GitHub creates the tag when you do.
-7. Put the printed `version` and `sha256` into `Casks/coastty.rb`, and commit it together with `dist/macos/last-build-number`, which `--publish` updates. The cask lives in this repo until the tap `ehs5/homebrew-coastty` exists; from then on, update the tap's copy instead.
+5. Run `dist/macos/release.sh --publish` to build again and upload `Coastty.dmg` to a draft GitHub release for the tag, with the release notes as its text. Review the draft on GitHub and publish it there; GitHub creates the tag when you do.
+6. Put the printed `version` and `sha256` into `Casks/coastty.rb`, and commit it together with `dist/macos/last-build-number`, which `--publish` updates. The cask lives in this repo until the tap `ehs5/homebrew-coastty` exists; from then on, update the tap's copy instead.
 
 The script refuses to run on a working tree with uncommitted changes, without exactly one `vX.Y.Z` tag on `HEAD`, when the tag does not match `COASTTY_VERSION`, or when the tag or a release for it already exists on GitHub. `RELEASE_DIR` changes where the app and DMG go, and `ZIG` picks the zig binary.
 

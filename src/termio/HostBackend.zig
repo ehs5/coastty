@@ -329,57 +329,11 @@ fn resolveCwd(configured: ?[:0]const u8) ?[]const u8 {
     return if (home.len > 0) home else null;
 }
 
-/// How long a daemon of another coastty version gets to write its model out and exit before this app starts its own.
-const retire_timeout_ms = 3000;
-
-/// The daemon's answer to `VERSION` on `conn`, or null when it gave none. Caller owns it.
-fn askVersion(alloc: Allocator, io: Io, conn: net.Stream) ?[]u8 {
-    var wbuf: [64]u8 = undefined;
-    var w = conn.writer(io, &wbuf);
-    wire.writeHeaderLine(&w.interface, "VERSION", .{}) catch return null;
-
-    var rbuf: [wire.max_header_len]u8 = undefined;
-    var r = conn.reader(io, &rbuf);
-    return wire.readHeader(alloc, &r.interface) catch null;
-}
-
-/// Stops a daemon built as another coastty version, such as the one still running from before an upgrade, so this app starts its own.
-/// Every pane restarts once as a fresh shell in its directory; the Spaces and tabs survive because the daemon writes its model out on SIGTERM.
-fn retireOtherVersion(alloc: Allocator, io: Io) void {
-    const path = paths.socketPath(alloc) catch return;
-    defer alloc.free(path);
-    const conn = access.connect(io, path) orelse return;
-    const pid = access.peerPid(conn);
-    const answer = askVersion(alloc, io, conn);
-    conn.close(io);
-
-    // Without an answer the daemon's version is unknown, and stopping it would end every pane for nothing
-    const version = answer orelse return;
-    defer alloc.free(version);
-    if (!wire.isOtherVersion(version, wire.coastty_version)) return;
-
-    const daemon_pid = pid orelse {
-        log.warn("coastty-host is not version {s} but its pid is unknown; quit Coastty and stop it by hand", .{wire.coastty_version});
-        return;
-    };
-
-    log.info("stopping coastty-host (pid {d}), which answered '{s}' and is not version {s}", .{ daemon_pid, version, wire.coastty_version });
-    std.posix.kill(daemon_pid, .TERM) catch |err| {
-        log.warn("could not stop coastty-host (pid {d}): {t}", .{ daemon_pid, err });
-        return;
-    };
-
-    if (access.waitForProcessGone(io, daemon_pid, retire_timeout_ms)) return;
-    log.warn("coastty-host (pid {d}) has not exited; this app talks to it until it does", .{daemon_pid});
-}
-
 /// Starts the daemon if it isn't already running, and reports whether one
 /// is reachable afterwards. The GUI calls this before asking for the
 /// model: the daemon owns the Spaces and tabs a window is built from, so
 /// waiting for a pane to need one would be backwards.
-/// A daemon of another coastty version is stopped first and replaced with this app's own.
 pub fn ensureRunning(alloc: Allocator, io: Io) bool {
-    retireOtherVersion(alloc, io);
     const conn = connectOrStartHost(alloc, io) catch return false;
     conn.close(io);
     startAppSubscription(alloc, io);
