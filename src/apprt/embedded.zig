@@ -1716,7 +1716,7 @@ pub const CAPI = struct {
 
     /// What the user should be told about the daemon found at launch,
     /// once: a daemon update to restart for, or a restart that could not
-    /// be avoided. Call after `ghostty_host_ensure_running`.
+    /// be avoided. `none` until the app first reaches the daemon.
     export fn ghostty_host_take_daemon_notice() termio.HostBackend.DaemonNotice {
         return termio.HostBackend.takeDaemonNotice();
     }

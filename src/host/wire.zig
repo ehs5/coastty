@@ -263,8 +263,7 @@ const Io = std.Io;
 
 pub const max_header_len = 4096;
 
-/// The event protocol this build speaks. The Mac app ships with the daemon
-/// and must speak exactly this.
+/// The event protocol this build speaks. The Mac app ships with the daemon and must speak exactly this.
 /// Bump it only when the app and the daemon can no longer talk: an app that finds a daemon speaking another one has to restart it, ending every pane's process.
 pub const protocol_version: u32 = 2;
 

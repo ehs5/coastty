@@ -375,12 +375,10 @@ class AppDelegate: NSObject,
                     self?.undoManager.enableUndoRegistration()
                     Self.coasttySweepUnclaimedHostPanes()
                     TerminalController.coasttySeedHostModel()
-                    DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
                 }
                 if !isRestoring {
                     _ = TerminalController.newWindow(ghostty)
                     undoManager.enableUndoRegistration()
-                    DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
                 }
             }
         }
@@ -643,6 +641,9 @@ class AppDelegate: NSObject,
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         syncFloatOnTopMenu(notification.object as? NSWindow)
+
+        // Async, so the alert runs after the window finishes becoming key rather than inside its notification.
+        DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
     }
 
     @objc private func quickTerminalDidChangeVisibility(_ notification: Notification) {

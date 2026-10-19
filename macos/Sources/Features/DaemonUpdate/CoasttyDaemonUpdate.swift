@@ -21,7 +21,7 @@ enum CoasttyDaemonUpdate {
     private static func showRestartFailed() {
         showAlert(
             "Coastty couldn't restart its background service",
-            "The background service that keeps your shells and agents running needs a restart, and Coastty couldn't stop it. Restart your Mac, or quit Coastty, run `pkill -x coastty-host` in Terminal and open Coastty again.")
+            "The background service that keeps your shells and agents running needs a restart, and Coastty couldn't stop it. Restart your Mac, or quit Coastty, run \"pkill -x coastty-host\" in Terminal and open Coastty again.")
     }
 
     /// Explains a restart that could not be avoided, after it happened.
@@ -59,7 +59,7 @@ enum CoasttyDaemonUpdate {
         restartNow()
     }
 
-    /// Tells the user what happened to the daemon found at launch, if anything; call once the windows are up.
+    /// Tells the user what happened to the daemon found at launch, if anything; called whenever a window becomes key, since the first contact with the daemon can come from any launch path.
     @MainActor
     static func showLaunchNotice() {
         switch ghostty_host_take_daemon_notice() {

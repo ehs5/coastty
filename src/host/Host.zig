@@ -25,6 +25,7 @@ const wire = @import("wire.zig");
 const upgrade = @import("upgrade.zig");
 const paths = @import("paths.zig");
 const access = @import("access.zig");
+const process = @import("process.zig");
 const layout_commands = @import("layout_commands.zig");
 
 const log = std.log.scoped(.coastty_host);
@@ -240,7 +241,7 @@ fn retireLegacyHost(host: *Host) void {
     };
 
     // Its SIGTERM handler flushes the model before exiting, so read it only after.
-    if (access.waitForProcessGone(host.io, pid, legacy_exit_timeout_ms)) return;
+    if (process.waitForGone(host.io, pid, legacy_exit_timeout_ms)) return;
     log.warn("the coastty host (pid {d}) on the old socket has not exited; its model writes may race this one's", .{pid});
 }
 
@@ -2566,14 +2567,14 @@ test "KILL terminates the pane's real process and drops it from the registry" {
     tc_create.finish();
 
     const pid = try panePid(&host, id);
-    try testing.expect(access.processExists(pid));
+    try testing.expect(process.exists(pid));
 
     const tc_kill = try TestConn.open(&host, "kill-send");
     defer tc_kill.finish();
     try testing.expectEqual(@as(usize, 1), try sendIdCommand(tc_kill.client, &tc_kill.token, "KILL", &.{id}));
 
     try testing.expectEqual(@as(usize, 0), host.panes.count());
-    try testing.expect(access.waitForProcessGone(testing.io, pid, 1000));
+    try testing.expect(process.waitForGone(testing.io, pid, 1000));
 }
 
 test "KILL takes several ids in one request" {
@@ -2622,7 +2623,7 @@ test "KILL forces out a process that ignores SIGTERM" {
     defer tc_kill.finish();
     try testing.expectEqual(@as(usize, 1), try sendIdCommand(tc_kill.client, &tc_kill.token, "KILL", &.{id}));
 
-    try testing.expect(!access.processExists(pid));
+    try testing.expect(!process.exists(pid));
 }
 
 test "SWEEP kills exactly the panes nobody claimed" {
@@ -2648,8 +2649,8 @@ test "SWEEP kills exactly the panes nobody claimed" {
 
     try testing.expectEqual(@as(usize, 1), host.panes.count());
     try testing.expect(host.panes.get(id_keep) != null);
-    try testing.expect(access.waitForProcessGone(testing.io, dropped_pid, 1000));
-    try testing.expect(access.processExists(kept_pid));
+    try testing.expect(process.waitForGone(testing.io, dropped_pid, 1000));
+    try testing.expect(process.exists(kept_pid));
 }
 
 test "SWEEP with no ids kills every pane" {

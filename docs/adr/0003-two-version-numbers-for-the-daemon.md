@@ -24,8 +24,9 @@ meets a daemon that is already running. The daemon reports both in answer to
 
 - **Protocol version** (`protocol_version`): bumped only when the app and
   the daemon can no longer talk. A daemon speaking another protocol cannot
-  serve the app at all, so the app restarts it before building its windows,
-  and once they are up a dialog says what happened and why.
+  serve the app at all, so the app restarts it the first time it reaches
+  for the daemon, before any pane connects, and once a window is up a
+  dialog says what happened and why.
 - **Daemon version** (`daemon_version`): bumped when the daemon's code
   changes in a way users should get. When the running daemon's is older,
   the app keeps using it and offers the update in a dialog, "Restart panes

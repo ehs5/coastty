@@ -25,6 +25,7 @@ test {
     _ = @import("host/Model.zig");
     _ = @import("host/Pane.zig");
     _ = @import("host/paths.zig");
+    _ = @import("host/process.zig");
     _ = @import("host/upgrade.zig");
     _ = @import("host/Windows.zig");
     _ = @import("host/wire.zig");

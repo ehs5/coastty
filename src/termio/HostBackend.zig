@@ -30,6 +30,7 @@ const wire = @import("../host/wire.zig");
 const agent_detection = @import("../agent-detection/main.zig");
 const paths = @import("../host/paths.zig");
 const access = @import("../host/access.zig");
+const process = @import("../host/process.zig");
 const upgrade = @import("../host/upgrade.zig");
 
 const log = std.log.scoped(.io_host);
@@ -348,8 +349,10 @@ pub const DaemonNotice = enum(c_int) {
 
 var daemon_notice: std.atomic.Value(DaemonNotice) = .init(.none);
 
-/// Set once the daemon running at launch has been compared with this app, so a later `ensureRunning` never does it again.
-var daemon_checked: std.atomic.Value(bool) = .init(false);
+/// Set once the daemon running at launch has been compared with this app, so a later contact never does it again.
+var daemon_checked = false;
+/// Guards `daemon_checked`, so a second caller waits out a restart rather than reaching the daemon being stopped.
+var daemon_check_mutex: std.Io.Mutex = .init;
 
 /// How long a daemon being restarted gets to write its model out and exit.
 const stop_timeout_ms = 5000;
@@ -382,7 +385,7 @@ fn stopDaemon(io: Io, pid: ?posix.pid_t) bool {
         return false;
     };
 
-    if (access.waitForProcessGone(io, daemon_pid, stop_timeout_ms)) return true;
+    if (process.waitForGone(io, daemon_pid, stop_timeout_ms)) return true;
     log.warn("coastty-host (pid {d}) has not exited", .{daemon_pid});
     return false;
 }
@@ -414,10 +417,19 @@ fn checkRunningDaemon(alloc: Allocator, io: Io) void {
         },
         .restart => {
             log.info("coastty-host speaks protocol {d} and this app {d}; restarting it", .{ found.protocol, upgrade.ours.protocol });
-            const notice: DaemonNotice = if (stopDaemon(io, pid)) .restarted else .restart_failed;
-            daemon_notice.store(notice, .release);
+            const stopped = stopDaemon(io, pid);
+            daemon_notice.store(if (stopped) .restarted else .restart_failed, .release);
         },
     }
+}
+
+/// Compares the daemon running at launch with this app on the first contact with it, whichever launch path makes that contact.
+fn checkRunningDaemonOnce(alloc: Allocator, io: Io) void {
+    daemon_check_mutex.lockUncancelable(io);
+    defer daemon_check_mutex.unlock(io);
+    if (daemon_checked) return;
+    daemon_checked = true;
+    checkRunningDaemon(alloc, io);
 }
 
 /// Stops the running daemon for a restart the user chose. The app relaunches next, and the daemon its launch starts brings every Space and tab back with fresh shells. False when it could not be stopped.
@@ -432,14 +444,7 @@ pub fn stopForRestart(alloc: Allocator, io: Io) bool {
     return stopDaemon(io, pid);
 }
 
-/// Opens the app at `app_path` again once this process has exited, for the relaunch that finishes a daemon restart.
-/// A shell waits for the exit, since LaunchServices only brings a still-running app to the front.
-pub fn relaunchAfterExit(alloc: Allocator, app_path: []const u8) void {
-    relaunchAfterExitOrFail(alloc, app_path) catch |err| {
-        log.warn("could not relaunch {s}: {}", .{ app_path, err });
-    };
-}
-
+/// Starts the detached shell that waits for this process to exit, then opens `app_path`.
 fn relaunchAfterExitOrFail(alloc: Allocator, app_path: []const u8) !void {
     const pid = try std.fmt.allocPrintSentinel(alloc, "{d}", .{std.c.getpid()}, 0);
     defer alloc.free(pid);
@@ -468,13 +473,19 @@ fn relaunchAfterExitOrFail(alloc: Allocator, app_path: []const u8) !void {
     try cmd.start(alloc);
 }
 
+/// Opens the app at `app_path` again once this process has exited, for the relaunch that finishes a daemon restart.
+/// A shell waits for the exit, since LaunchServices only brings a still-running app to the front.
+pub fn relaunchAfterExit(alloc: Allocator, app_path: []const u8) void {
+    relaunchAfterExitOrFail(alloc, app_path) catch |err| {
+        log.warn("could not relaunch {s}: {}", .{ app_path, err });
+    };
+}
+
 /// Starts the daemon if it isn't already running, and reports whether one
 /// is reachable afterwards. The GUI calls this before asking for the
 /// model: the daemon owns the Spaces and tabs a window is built from, so
 /// waiting for a pane to need one would be backwards.
-/// The first call compares a daemon already running with this app, and restarts it when the two cannot talk; see `host/upgrade.zig`.
 pub fn ensureRunning(alloc: Allocator, io: Io) bool {
-    if (!daemon_checked.swap(true, .acq_rel)) checkRunningDaemon(alloc, io);
     const conn = connectOrStartHost(alloc, io) catch return false;
     conn.close(io);
     startAppSubscription(alloc, io);
@@ -715,6 +726,7 @@ pub fn fetchModel(alloc: Allocator, io: Io, buf: []u8) usize {
 /// model, and starting one just to tell it about a change the GUI is
 /// about to stop believing in would be backwards.
 fn connectForCommand(alloc: Allocator, io: Io) !net.Stream {
+    checkRunningDaemonOnce(alloc, io);
     const path = try paths.socketPath(alloc);
     defer alloc.free(path);
     return access.connect(io, path) orelse error.NoHost;
@@ -1179,7 +1191,9 @@ fn sendAttach(alloc: Allocator, io: Io, conn: net.Stream, id: []const u8, token_
     };
 }
 
+/// Reaches coastty-host, starting it when nothing answers. The first contact compares a daemon already running with this app, and restarts it when the two cannot talk; see `host/upgrade.zig`.
 fn connectOrStartHost(alloc: Allocator, io: Io) !net.Stream {
+    checkRunningDaemonOnce(alloc, io);
     const path = try paths.socketPath(alloc);
     defer alloc.free(path);
 
