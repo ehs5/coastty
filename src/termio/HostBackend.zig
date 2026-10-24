@@ -1136,7 +1136,7 @@ fn sendAttach(alloc: Allocator, io: Io, conn: net.Stream, id: []const u8, token_
     };
 }
 
-/// Reaches coastty-host, starting it when nothing answers. The first contact compares a daemon already running with this app, and restarts it when the two cannot talk; see `host/upgrade.zig`.
+/// Reaches coastty-host, starting it when nothing answers. The first contact compares a daemon already running with this app, and restarts it when its protocol or daemon version differs from this app's; see `host/upgrade.zig`.
 fn connectOrStartHost(alloc: Allocator, io: Io) !net.Stream {
     checkRunningDaemonOnce(alloc, io);
     const path = try paths.socketPath(alloc);
