@@ -103,13 +103,13 @@ The script refuses to run on a working tree with uncommitted changes, without ex
 
 ### The daemon and protocol versions
 
-Upgrading the app never restarts `coastty-host` on its own, since that ends every pane's process. Two numbers in `src/host/wire.zig` decide what a new app does with the daemon it finds running ([ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md)):
+Restarting `coastty-host` ends every pane's process, so an app-only release never does it. Two numbers in `src/host/wire.zig` decide what a new app does with the daemon it finds running ([ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md)): when either differs from the app's, older or newer, the app restarts the daemon when it opens and then says so in a dialog.
 
-- Bump `daemon_version` when the daemon's code changes in a way users should get: a fix, a new feature, anything the old daemon gets wrong. The new app keeps the old daemon and asks the user to restart it. Leave it alone for refactors, tests and comments, and release those with `--no-daemon-bump`.
-- Bump `protocol_version` only when the app and the daemon can no longer talk: a request or event changed in a way the other side cannot read. The new app restarts the old daemon without asking and explains afterwards, so avoid it; add a request or a capability instead where you can.
+- Bump `daemon_version` when the daemon's code changes in a way users should get: a fix, a new feature, anything the old daemon gets wrong. Leave it alone for refactors, tests and comments, and release those with `--no-daemon-bump`.
+- Bump `protocol_version` only when the app and the daemon can no longer talk: a request or event changed in a way the other side cannot read. Avoid it; add a request or a capability instead where you can.
 - `COASTTY_VERSION` changes with every release and has no effect on the daemon.
 
-To try the dialogs by hand, bump `daemon_version` (or `protocol_version`) in a local build, open some panes in the build before it, quit it and open the new one.
+To try the dialog by hand, bump `daemon_version` (or `protocol_version`) in a local build, open some panes in the build before it, quit it and open the new one.
 
 Until coastty has an Apple Developer ID the app is signed ad hoc and the DMG not at all, so users must approve the first launch in System Settings; the README describes the steps.
 

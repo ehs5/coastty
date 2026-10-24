@@ -398,11 +398,6 @@ class AppDelegate: NSObject,
             return .terminateNow
         }
 
-        // The user chose to restart the daemon, which already ended every pane; the relaunch brings them back.
-        if CoasttyDaemonUpdate.relaunchOnTerminate {
-            return .terminateNow
-        }
-
         // If the user is shutting down, restarting, or logging out, we don't confirm quit.
         why: if let event = NSAppleEventManager.shared().currentAppleEvent {
             // If all Ghostty windows are in the background (i.e. you Cmd-Q from the Cmd-Tab
@@ -435,8 +430,6 @@ class AppDelegate: NSObject,
 
         // Flush now rather than waiting on the debounce timer.
         CoasttySessionSaveScheduler.shared.flushNow()
-
-        CoasttyDaemonUpdate.relaunchIfRestarting()
     }
 
     /// This is called when the application is already open and someone double-clicks the icon

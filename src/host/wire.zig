@@ -267,7 +267,7 @@ pub const max_header_len = 4096;
 /// Bump it only when the app and the daemon can no longer talk: an app that finds a daemon speaking another one has to restart it, ending every pane's process.
 pub const protocol_version: u32 = 2;
 
-/// The daemon's own version, which `VERSION` answers with. Bumped when the daemon's code changes in a way users should get; an app that finds an older one running keeps it and asks before restarting it, since a restart ends every pane's process.
+/// The daemon's own version, which `VERSION` answers with. Bumped when the daemon's code changes in a way users should get; an app that finds another one running restarts it, ending every pane's process.
 /// The app's own version never enters into it, so an app-only release leaves running panes alone.
 pub const daemon_version: u32 = 1;
 

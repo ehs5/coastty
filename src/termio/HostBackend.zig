@@ -335,11 +335,9 @@ fn resolveCwd(configured: ?[:0]const u8) ?[]const u8 {
 pub const DaemonNotice = enum(c_int) {
     /// Nothing to tell: the daemon was kept as it is, or this app started it.
     none,
-    /// The running daemon has an older daemon version; restarting it is the user's choice.
-    update_available,
-    /// The running daemon spoke another protocol, so it was restarted and every pane started again.
+    /// The running daemon was of another version, so it was restarted and every pane started again.
     restarted,
-    /// The running daemon spoke another protocol and could not be stopped.
+    /// The running daemon was of another version and could not be stopped.
     restart_failed,
 
     test "ghostty.h DaemonNotice" {
@@ -390,7 +388,7 @@ fn stopDaemon(io: Io, pid: ?posix.pid_t) bool {
     return false;
 }
 
-/// Compares the daemon already running with this app, restarting it only when the two cannot talk, and notes what the user should be told.
+/// Compares the daemon already running with this app, restarting it when its versions differ, and notes what the user should be told.
 fn checkRunningDaemon(alloc: Allocator, io: Io) void {
     const path = paths.socketPath(alloc) catch return;
     defer alloc.free(path);
@@ -411,12 +409,8 @@ fn checkRunningDaemon(alloc: Allocator, io: Io) void {
 
     switch (upgrade.decide(found, upgrade.ours)) {
         .keep => {},
-        .ask => {
-            log.info("coastty-host is daemon version {d} and this app's is {d}; keeping it until the user restarts it", .{ found.daemon, upgrade.ours.daemon });
-            daemon_notice.store(.update_available, .release);
-        },
         .restart => {
-            log.info("coastty-host speaks protocol {d} and this app {d}; restarting it", .{ found.protocol, upgrade.ours.protocol });
+            log.info("coastty-host is protocol {d}, daemon version {d} and this app's are {d}, {d}; restarting it", .{ found.protocol, found.daemon, upgrade.ours.protocol, upgrade.ours.daemon });
             const stopped = stopDaemon(io, pid);
             daemon_notice.store(if (stopped) .restarted else .restart_failed, .release);
         },
@@ -430,55 +424,6 @@ fn checkRunningDaemonOnce(alloc: Allocator, io: Io) void {
     if (daemon_checked) return;
     daemon_checked = true;
     checkRunningDaemon(alloc, io);
-}
-
-/// Stops the running daemon for a restart the user chose. The app relaunches next, and the daemon its launch starts brings every Space and tab back with fresh shells. False when it could not be stopped.
-pub fn stopForRestart(alloc: Allocator, io: Io) bool {
-    const path = paths.socketPath(alloc) catch return false;
-    defer alloc.free(path);
-
-    // Already gone: the relaunch starts the new one all the same
-    const conn = access.connect(io, path) orelse return true;
-    const pid = access.peerPid(conn);
-    conn.close(io);
-    return stopDaemon(io, pid);
-}
-
-/// Starts the detached shell that waits for this process to exit, then opens `app_path`.
-fn relaunchAfterExitOrFail(alloc: Allocator, app_path: []const u8) !void {
-    const pid = try std.fmt.allocPrintSentinel(alloc, "{d}", .{std.c.getpid()}, 0);
-    defer alloc.free(pid);
-    const app = try alloc.dupeZ(u8, app_path);
-    defer alloc.free(app);
-
-    const script = "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open \"$2\"";
-    const args = [_][:0]const u8{ "/bin/sh", "-c", script, "sh", pid, app };
-    var cmd: Command = .{
-        .path = "/bin/sh",
-        .args = &args,
-        .env = null,
-        .cwd = null,
-        .stdin = null,
-        .stdout = null,
-        .stderr = null,
-        .os_pre_exec = null,
-        .rt_pre_exec = null,
-        .rt_pre_exec_info = .{},
-        .rt_post_fork = null,
-        .rt_post_fork_info = .{},
-        .data = null,
-    };
-
-    // Not waited for: it outlives this process, which is about to exit
-    try cmd.start(alloc);
-}
-
-/// Opens the app at `app_path` again once this process has exited, for the relaunch that finishes a daemon restart.
-/// A shell waits for the exit, since LaunchServices only brings a still-running app to the front.
-pub fn relaunchAfterExit(alloc: Allocator, app_path: []const u8) void {
-    relaunchAfterExitOrFail(alloc, app_path) catch |err| {
-        log.warn("could not relaunch {s}: {}", .{ app_path, err });
-    };
 }
 
 /// Starts the daemon if it isn't already running, and reports whether one

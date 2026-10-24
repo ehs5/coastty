@@ -914,7 +914,6 @@ typedef enum {
 // termio.HostBackend.DaemonNotice
 typedef enum {
   GHOSTTY_HOST_DAEMON_NOTICE_NONE,
-  GHOSTTY_HOST_DAEMON_NOTICE_UPDATE_AVAILABLE,
   GHOSTTY_HOST_DAEMON_NOTICE_RESTARTED,
   GHOSTTY_HOST_DAEMON_NOTICE_RESTART_FAILED,
 } ghostty_host_daemon_notice_e;
@@ -1233,8 +1232,6 @@ GHOSTTY_API void ghostty_host_sweep_panes(const char* const*, size_t);
 GHOSTTY_API void ghostty_host_set_request_handler(void (*)(const char*, size_t));
 GHOSTTY_API bool ghostty_host_ensure_running(void);
 GHOSTTY_API ghostty_host_daemon_notice_e ghostty_host_take_daemon_notice(void);
-GHOSTTY_API bool ghostty_host_stop_for_restart(void);
-GHOSTTY_API void ghostty_host_relaunch_after_exit(const char*);
 GHOSTTY_API void ghostty_host_report_focus(const char*, const char*, const char*);
 GHOSTTY_API void ghostty_host_report_windows(const char*, size_t);
 GHOSTTY_API ghostty_command_link_result_e ghostty_command_link_install(const char*, const char*);

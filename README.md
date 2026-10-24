@@ -4,7 +4,7 @@ A terminal that keeps an eye on your agents.
 
 Coastty is a terminal emulator for macOS, built on [Ghostty](https://ghostty.org), that lets you see which of your AI coding agents are working and which are waiting for you. It is free and open source.
 
-A sidebar shows what every agent you are running is doing, in every tab, so you only look at a tab when something there needs you. Spaces keep your tabs organised, and your sessions outlive the app: quit Coastty, reopen it, and every shell and agent is still running where you left it. Layout commands let you, your scripts and your agents arrange it all from any shell.
+A sidebar shows what every agent you are running is doing, in every tab, so you only look at a tab when something there needs you. Spaces keep your tabs organised, and your sessions outlive the app: quit Coastty, reopen it, and every shell is still running where you left it. Layout commands let you, your scripts and your agents arrange it all from any shell.
 
 Rendering, terminal emulation, the configuration format and Ghostty's keybindings all come from Ghostty, so its documentation applies.
 
@@ -62,13 +62,12 @@ macOS asks again after each `brew upgrade`. Every build carries a new ad-hoc sig
 
 ### Updating
 
-`brew upgrade` installs a new Coastty, or download the new `Coastty.dmg` and replace the app. Your shells and agents run in `coastty-host`, a background service that keeps running when you quit or replace the app. What an update does to them depends on what changed:
+`brew upgrade` installs a new Coastty, or download the new `Coastty.dmg` and replace the app. Your shells run in `coastty-host`, a background service that keeps running when you quit or replace the app. What an update does to them depends on what changed:
 
-- **Most updates keep every pane running.** When only the app changed, the new Coastty connects to the background service already running and every pane is where you left it.
-- **Some update the background service too, and ask first.** When a release changes the background service, Coastty keeps using the one already running and asks whether to restart it, with **Restart now** and **Later**. Restarting ends every running shell and agent; your Spaces and tabs come back, each with a fresh shell in the directory it was in, and Coastty reopens. Choose **Later** to finish your work first; Coastty asks again at its next launch, and restarting your Mac updates it too.
-- **A few cannot keep the old background service.** When a release changes how the app and the background service talk to each other, the new Coastty cannot use the old one, so it restarts it when it opens and then tells you it did. Your Spaces and tabs come back with fresh shells, as above.
+- **Most updates keep every shell running.** When only the app changed, the new Coastty connects to the background service already running and every pane is where you left it.
+- **Some update the background service too.** When a release includes a new version of the background service, the new Coastty restarts it when it opens and then tells you it did. Restarting ends every running shell; your Spaces and tabs come back, each with a fresh shell in the directory it was in.
 
-The release notes say up front when a release updates the background service or restarts it. [ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md) records why it works this way.
+The release notes say up front when a release updates the background service. [ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md) records why it works this way.
 
 ### Building from source
 
