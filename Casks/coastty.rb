@@ -1,6 +1,6 @@
 cask "coastty" do
   version "0.1.0"
-  sha256 :no_check
+  sha256 "1946def3c9275dcdee606b922f695ec9c5ca2df068b986f4b2a9457b90884fce"
 
   url "https://github.com/ehs5/coastty/releases/download/v#{version}/Coastty.dmg"
   name "Coastty"
