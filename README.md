@@ -113,9 +113,11 @@ Issues and pull requests are welcome. Open an issue and agree on the approach fi
 
 ## Credits
 
-Coastty is a fork of [Ghostty](https://github.com/ghostty-org/ghostty) by Mitchell Hashimoto and its contributors. Nearly all of the code is theirs.
+Coastty is a fork of [Ghostty](https://github.com/ghostty-org/ghostty) by Mitchell Hashimoto and its contributors.
 
 Agent detection is ported from [herdr](https://github.com/herdrdev/herdr) (Apache 2.0).
+
+Coastty stands on their shoulders.
 
 Made by [Espen Steen](https://steen.cc).
 
