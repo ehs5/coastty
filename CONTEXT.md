@@ -19,6 +19,14 @@ Decisions that are hard to reverse live in `docs/adr/`.
   when it subscribes as the app; without it those are refused. Reading the
   model and asking for layout changes need no token. Never placed in a pane's
   environment or on a command line.
+- **protocol version** - `wire.protocol_version`, the version of the wire
+  protocol. Bumped only when the app and the daemon can no longer talk.
+- **daemon version** - `wire.daemon_version`, the version of the daemon's
+  own code, which the daemon reports in answer to `VERSION` along with the
+  protocol version. Bumped when the daemon changes in a way users should get.
+  An app that finds a daemon with either number different from its own, older
+  or newer, restarts it and tells the user afterwards (ADR-0003). Not the
+  app's version: an app-only release changes neither number.
 - **the GUI** (the Mac app) - one client of the daemon. It draws; it does not own
   the model.
 - **client** - anything speaking the wire protocol: the GUI, `coastty attach`,
@@ -101,6 +109,11 @@ Decisions that are hard to reverse live in `docs/adr/`.
   the rest.
 - **session ended** - a pane whose process died while the GUI was closed; on
   reattach it becomes a fresh shell with a visible notice.
+- **daemon restart** - the daemon is stopped with SIGTERM, which writes the
+  model out, and a new one started. Every pane's process ends and comes back
+  as a fresh shell in its directory; Spaces and tabs survive. The app causes
+  one only when the running daemon's protocol or daemon version differs from
+  its own, and a dialog always says so afterwards.
 
 ## Ghostty terms that matter here
 

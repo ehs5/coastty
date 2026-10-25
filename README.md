@@ -4,7 +4,7 @@ A terminal that keeps an eye on your agents.
 
 Coastty is a terminal emulator for macOS, built on [Ghostty](https://ghostty.org), that lets you see which of your AI coding agents are working and which are waiting for you. It is free and open source.
 
-A sidebar shows what every agent you are running is doing, in every tab, so you only look at a tab when something there needs you. Spaces keep your tabs organised, and your sessions outlive the app: quit Coastty, reopen it, and every shell and agent is still running where you left it. Layout commands let you, your scripts and your agents arrange it all from any shell.
+A sidebar shows what every agent you are running is doing, in every tab, so you only look at a tab when something there needs you. Spaces keep your tabs organised, and your sessions outlive the app: quit Coastty, reopen it, and every shell is still running where you left it. Layout commands let you, your scripts and your agents arrange it all from any shell.
 
 Rendering, terminal emulation, the configuration format and Ghostty's keybindings all come from Ghostty, so its documentation applies.
 
@@ -36,7 +36,42 @@ The commands change layout and nothing else. No command can type into a pane, st
 
 ## Install
 
-Coastty runs on macOS Golden Gate. There are no release builds yet, so you build it from source. You need [Zig 0.16](https://ziglang.org/download/) and a recent Xcode.
+Coastty runs on macOS Golden Gate. Install it with Homebrew:
+
+```sh
+brew install --cask ehs5/coastty/coastty
+```
+
+Homebrew also puts the `coastty` command on your `PATH`, and `brew upgrade` keeps Coastty up to date. To install by hand instead, download `Coastty.dmg` from [GitHub Releases](https://github.com/ehs5/coastty/releases) and drag Coastty into Applications.
+
+### The first launch
+
+Coastty is not yet signed with an Apple Developer ID, so macOS blocks it the first time you open it. Homebrew quarantines what it downloads just as a browser does, so this applies to both ways of installing.
+
+1. Open Coastty. macOS says it could not verify that Coastty is free of malware. Choose **Done**.
+2. Open **System Settings > Privacy & Security** and scroll down to **Security**. Next to the message that Coastty was blocked, click **Open Anyway**.
+3. Confirm with your password or Touch ID, then choose **Open**.
+
+Or clear the quarantine flag from a terminal, which skips all three steps:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Coastty.app
+```
+
+macOS asks again after each `brew upgrade`. Every build carries a new ad-hoc signature, so Homebrew cannot carry your approval over to the new version, and says so with a "signer changed" warning.
+
+### Updating
+
+`brew upgrade` installs a new Coastty, or download the new `Coastty.dmg` and replace the app. Your shells run in `coastty-host`, a background service that keeps running when you quit or replace the app. What an update does to them depends on what changed:
+
+- **Most updates keep every shell running.** When only the app changed, the new Coastty connects to the background service already running and every pane is where you left it.
+- **Some update the background service too.** When a release includes a new version of the background service, the new Coastty restarts it when it opens and then tells you it did. Restarting ends every running shell; your Spaces and tabs come back, each with a fresh shell in the directory it was in.
+
+The release notes say up front when a release updates the background service. [ADR 0003](docs/adr/0003-two-version-numbers-for-the-daemon.md) records why it works this way.
+
+### Building from source
+
+You need [Zig 0.16](https://ziglang.org/download/) and a recent Xcode.
 
 ```sh
 zig build -Doptimize=ReleaseFast
@@ -49,7 +84,7 @@ Coastty is macOS only. Ghostty's Linux (GTK) app, its experimental iOS/browser t
 
 ### The `coastty` command
 
-Inside Coastty's own panes, `coastty` is already on your `PATH`. To use it from other terminals, choose **Coastty > Install 'coastty' command in PATH**. It links `/usr/local/bin/coastty` to the app and asks for your password only if that folder needs it. **Uninstall 'coastty' command from PATH** removes the link again.
+Inside Coastty's own panes, `coastty` is already on your `PATH`, and a Homebrew install puts it there for every terminal. Without Homebrew, choose **Coastty > Install 'coastty' command in PATH**. It links `/usr/local/bin/coastty` to the app and asks for your password only if that folder needs it. **Uninstall 'coastty' command from PATH** removes the link again.
 
 ## Configuration
 

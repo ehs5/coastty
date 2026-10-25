@@ -1714,6 +1714,13 @@ pub const CAPI = struct {
         return termio.HostBackend.ensureRunning(global.alloc(), global.io());
     }
 
+    /// What the user should be told about the daemon found at launch,
+    /// once: that it was restarted, or that it could not be. `none` until
+    /// the app first reaches the daemon.
+    export fn ghostty_host_take_daemon_notice() termio.HostBackend.DaemonNotice {
+        return termio.HostBackend.takeDaemonNotice();
+    }
+
     /// Writes the daemon's model into `buf` as JSON and returns its
     /// length - or the length needed, when it does not fit, so the caller
     /// can retry larger. Zero means no daemon answered.

@@ -634,6 +634,9 @@ class AppDelegate: NSObject,
 
     @objc private func windowDidBecomeKey(_ notification: Notification) {
         syncFloatOnTopMenu(notification.object as? NSWindow)
+
+        // Async, so the alert runs after the window finishes becoming key rather than inside its notification.
+        DispatchQueue.main.async { CoasttyDaemonUpdate.showLaunchNotice() }
     }
 
     @objc private func quickTerminalDidChangeVisibility(_ notification: Notification) {

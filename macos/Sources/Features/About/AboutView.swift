@@ -122,6 +122,9 @@ struct AboutView: View {
                             openURL(url)
                         }
                     }
+                    Button("Licenses") {
+                        LicensesController.shared.show()
+                    }
                 }
 
                 if let copy = self.copyright {

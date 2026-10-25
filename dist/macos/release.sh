@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
-# Builds Coastty.app for the version tag on HEAD and stamps its version and build number into Info.plist.
+# Builds Coastty.app for the version tag on HEAD, stamps its version and build number, and packages it as Coastty.dmg.
 #
-# Usage: tag the release commit (git tag v0.1.0), then run dist/macos/release.sh from anywhere in the repo.
+# Usage: tag the release commit (git tag v0.1.0), then run from anywhere in the repo:
+#   dist/macos/release.sh            build Coastty.dmg and print the cask values, uploading nothing
+#   dist/macos/release.sh --publish  the same, then upload Coastty.dmg to a draft GitHub release
+#
+# A release that changed src/host/ since the last one must bump daemon_version in src/host/wire.zig, so users are offered the new daemon.
+# --no-daemon-bump releases anyway, for a change users need not restart their panes for.
 #
 # Environment:
-#   RELEASE_DIR  where the stamped Coastty.app is written (default: zig-out/release)
+#   RELEASE_DIR  where the stamped Coastty.app and Coastty.dmg are written (default: zig-out/release)
 #   ZIG          the zig binary to build with (default: zig on PATH)
 #
-# The build number is YYYYMMDD.N and must only ever increase, so the last release's is kept in dist/macos/last-build-number.
-# Commit that file with the release.
+# The build number is YYYYMMDD.N and must only ever increase, so the last published release's is kept in dist/macos/last-build-number.
+# --publish updates that file; commit it after the release.
 set -euo pipefail
 
 repo=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 last_build_file="$repo/dist/macos/last-build-number"
+notes_dir="$repo/dist/macos/release-notes"
 release_dir="${RELEASE_DIR:-$repo/zig-out/release}"
 zig="${ZIG:-zig}"
+create_dmg="create-dmg@8.1.0"
 
 # Prints a message to stderr and stops the release.
 fail() {
@@ -89,29 +96,114 @@ build_number() {
   echo "$build"
 }
 
-# Builds, stamps and re-signs the release for the tag on HEAD.
-main() {
-  local tag version file_version build app plist
+# Refuses uncommitted changes, which would ship in a build the tag does not describe.
+check_clean_tree() {
+  if [[ -n $(git -C "$repo" status --porcelain) ]]; then
+    fail "the working tree has uncommitted changes"
+  fi
+}
 
-  # The tag names the version; VERSION must agree so dev builds count up from the same number
-  tag=$(release_tag)
-  version=${tag#v}
-  file_version=$(tr -d '[:space:]' <"$repo/VERSION")
+# Refuses a tag that origin already has: a published version is never rebuilt under the same number.
+check_tag_unpublished() {
+  local tag=$1 status=0
+  git -C "$repo" ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || status=$?
 
-  if [[ $version != "$file_version" ]]; then
-    fail "tag $tag does not match VERSION ($file_version)"
+  if ((status == 0)); then
+    fail "tag $tag already exists on origin"
   fi
 
-  build=$(build_number)
-  echo "release: building Coastty $version, build $build"
+  # ls-remote exits 2 only when it reached origin and found no such tag
+  if ((status != 2)); then
+    fail "could not ask origin whether $tag exists"
+  fi
+}
+
+# Refuses what would stop a draft release from being created for the tag on HEAD.
+check_publishable() {
+  local tag=$1 notes=$2
+
+  if [[ ! -f $notes ]]; then
+    fail "write the release notes in ${notes#"$repo/"} first"
+  fi
+
+  # A logged-out or offline gh would pass the release check below and fail only after the whole build
+  if ! gh auth status >/dev/null 2>&1; then
+    fail "gh cannot reach GitHub as a logged-in user; check gh auth status"
+  fi
+
+  if gh release view "$tag" >/dev/null 2>&1; then
+    fail "a GitHub release for $tag already exists"
+  fi
+
+  # gh creates the tag on GitHub when the draft is published, so the commit must already be there
+  if [[ -z $(git -C "$repo" branch -r --contains HEAD) ]]; then
+    fail "HEAD is not on origin yet; push the release commit first"
+  fi
+}
+
+# Prints the value of the u32 constant $2 in src/host/wire.zig at commit $1, or 0 when it has none there.
+wire_constant_at() {
+  local line
+  line=$(git -C "$repo" show "$1:src/host/wire.zig" | grep -E "^pub const $2: u32 = [0-9]+;$" || true)
+
+  if [[ -z $line ]]; then
+    echo 0
+    return
+  fi
+
+  line=${line##*= }
+  echo "${line%;}"
+}
+
+# Refuses a release that changed src/host/ since the last release without bumping the daemon version, unless $1 is yes.
+check_daemon_version() {
+  local allow_no_bump=$1 previous daemon_before daemon_now protocol_before protocol_now
+  previous=$(git -C "$repo" describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)
+
+  # The first release has nothing to compare with
+  if [[ -z $previous ]]; then
+    return
+  fi
+
+  # Nothing in the daemon's own code changed
+  if git -C "$repo" diff --quiet "$previous" HEAD -- src/host/; then
+    return
+  fi
+
+  daemon_before=$(wire_constant_at "$previous" daemon_version)
+  daemon_now=$(wire_constant_at HEAD daemon_version)
+
+  if ((daemon_now > daemon_before)); then
+    echo "release: daemon version $daemon_before -> $daemon_now; say so up front in the release notes"
+    return
+  fi
+
+  # A new protocol restarts the daemon on its own, so it needs no daemon version bump on top
+  protocol_before=$(wire_constant_at "$previous" protocol_version)
+  protocol_now=$(wire_constant_at HEAD protocol_version)
+
+  if ((protocol_now > protocol_before)); then
+    echo "release: protocol version $protocol_before -> $protocol_now; say so up front in the release notes"
+    return
+  fi
+
+  if [[ $allow_no_bump == yes ]]; then
+    echo "release: src/host/ changed since $previous with daemon version $daemon_now unchanged, as --no-daemon-bump allows"
+    return
+  fi
+
+  fail "src/host/ changed since $previous but daemon_version in src/host/wire.zig is still $daemon_now; bump it, or run with --no-daemon-bump when users need not restart their panes for this change"
+}
+
+# Builds the app into $1 and stamps version $2 and build $3 into it.
+build_app() {
+  local app=$1 version=$2 build=$3 plist
 
   # zig's install step merges into an existing bundle, so clear it to keep stale files out of the release
   rm -rf "$repo/zig-out/Coastty.app"
   (cd "$repo" && "$zig" build -Doptimize=ReleaseFast -Dcoastty-version="$version")
 
-  app="$release_dir/Coastty.app"
   rm -rf "$app"
-  mkdir -p "$release_dir"
   ditto "$repo/zig-out/Coastty.app" "$app"
 
   # Stamp the version and build number, as Ghostty's release workflow does after xcodebuild
@@ -119,12 +211,102 @@ main() {
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build" "$plist"
 
-  # Editing Info.plist breaks the bundle's signature; sign it again ad hoc until there is a Developer ID
-  codesign --force --sign - --preserve-metadata=entitlements,requirements,flags,runtime "$app"
+  # MIT wants Ghostty's notice in all copies and Apache 2.0 wants herdr's licence given to every recipient; the Xcode project copies both into every build
+  for license in LICENSE LICENSE-herdr; do
+    if [[ ! -f "$app/Contents/Resources/$license" ]]; then
+      fail "the built app has no $license in its resources"
+    fi
+  done
 
+  # Editing the bundle breaks its signature; sign it again ad hoc until there is a Developer ID
+  codesign --force --sign - --preserve-metadata=entitlements,requirements,flags,runtime "$app"
+}
+
+# Wraps app $1 in dmg $2, unsigned until there is a Developer ID.
+make_dmg() {
+  local app=$1 dmg=$2 staging="$release_dir/dmg"
+
+  rm -rf "$staging" "$dmg"
+  mkdir -p "$staging"
+
+  # create-dmg turns a license.txt in its working directory into a click-through agreement, so run it from the empty staging folder
+  (cd "$staging" && npx --yes "$create_dmg" --no-version-in-filename --no-code-sign "$app" "$staging")
+
+  mv "$staging/Coastty.dmg" "$dmg"
+  rm -rf "$staging"
+}
+
+# Prints the values Casks/coastty.rb needs for this release.
+print_cask_values() {
+  local version=$1 sha=$2
+
+  echo "release: values for Casks/coastty.rb:"
+  echo "  version \"$version\""
+  echo "  sha256 \"$sha\""
+  echo "release: the cask builds its url from the version: https://github.com/ehs5/coastty/releases/download/v$version/Coastty.dmg"
+}
+
+# Uploads the dmg to a draft release for the tag, which stays unpublished until it is reviewed on GitHub.
+publish() {
+  local tag=$1 dmg=$2 notes=$3 version=${1#v}
+
+  gh release create "$tag" "$dmg" --draft --target "$(git -C "$repo" rev-parse HEAD)" --title "Coastty $version" --notes-file "$notes"
+}
+
+# Builds, stamps and packages the release for the tag on HEAD, and uploads it with --publish.
+main() {
+  local publish=no allow_no_bump=no arg tag version file_version build app dmg sha notes
+
+  for arg in "$@"; do
+    case $arg in
+      --publish) publish=yes ;;
+      --no-daemon-bump) allow_no_bump=yes ;;
+      *) fail "unknown argument '$arg'; the options are --publish and --no-daemon-bump" ;;
+    esac
+  done
+
+  check_clean_tree
+
+  # The tag names the version; COASTTY_VERSION must agree so dev builds count up from the same number
+  tag=$(release_tag)
+  version=${tag#v}
+  file_version=$(tr -d '[:space:]' <"$repo/COASTTY_VERSION")
+
+  if [[ $version != "$file_version" ]]; then
+    fail "tag $tag does not match COASTTY_VERSION ($file_version)"
+  fi
+
+  check_tag_unpublished "$tag"
+  check_daemon_version "$allow_no_bump"
+  notes="$notes_dir/$tag.md"
+
+  if [[ $publish == yes ]]; then
+    check_publishable "$tag" "$notes"
+  fi
+
+  build=$(build_number)
+  echo "release: building Coastty $version, build $build"
+
+  mkdir -p "$release_dir"
+  app="$release_dir/Coastty.app"
+  dmg="$release_dir/Coastty.dmg"
+  build_app "$app" "$version" "$build"
+  make_dmg "$app" "$dmg"
+
+  sha=$(shasum -a 256 "$dmg" | cut -d ' ' -f 1)
+  echo "release: $dmg is Coastty $version, build $build"
+  echo "release: SHA-256 $sha"
+  print_cask_values "$version" "$sha"
+
+  if [[ $publish != yes ]]; then
+    echo "release: nothing uploaded; run with --publish to create the draft release"
+    return
+  fi
+
+  publish "$tag" "$dmg" "$notes"
   echo "$build" >"$last_build_file"
-  echo "release: $app is Coastty $version, build $build"
-  echo "release: commit dist/macos/last-build-number with this release"
+  echo "release: draft release $tag created; review and publish it on GitHub"
+  echo "release: then update Casks/coastty.rb and commit it with dist/macos/last-build-number"
 }
 
 main "$@"
