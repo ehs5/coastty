@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/coastty/coastty-icon-256.png" width="128" height="128" alt="The Coastty app icon: a palm tree on a dark tile, with two small purple waves">
+</p>
+
 # Coastty
 
 A terminal that keeps an eye on your agents.
