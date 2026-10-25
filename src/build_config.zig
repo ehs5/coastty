@@ -13,9 +13,12 @@ const BuildConfig = @import("build/Config.zig");
 
 pub const ReleaseChannel = BuildConfig.ReleaseChannel;
 
-/// The semantic version of this build.
+/// The semantic version of the Ghostty this build is based on. Programs in a pane see this one, to detect Ghostty features.
 pub const version = options.app_version;
 pub const version_string = options.app_version_string;
+
+/// Coastty's own version, from the VERSION file or a release build's tag.
+pub const coastty_version_string = options.coastty_version_string;
 
 /// The release channel for this build.
 pub const release_channel = std.meta.stringToEnum(ReleaseChannel, @tagName(options.release_channel)).?;

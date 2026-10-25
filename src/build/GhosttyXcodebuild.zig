@@ -71,6 +71,9 @@ pub fn init(
             xc_config,
         });
 
+        // Overridden here rather than in the project so Ghostty's edits to MARKETING_VERSION keep merging.
+        step.addArg(b.fmt("MARKETING_VERSION={f}", .{config.coastty_version}));
+
         // If we have a specific architecture, we need to pass it
         // to xcodebuild.
         if (xc_arch) |arch| step.addArgs(&.{ "-arch", arch });

@@ -38,6 +38,7 @@ wasm_shared: bool = true,
 /// Ghostty exe properties
 exe_entrypoint: ExeEntrypoint = .ghostty,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+coastty_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 lib_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
 /// Binary properties
@@ -69,7 +70,12 @@ is_dep: bool = false,
 /// Environmental properties
 env: *const std.process.Environ.Map,
 
-pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Config {
+pub fn init(
+    b: *std.Build,
+    appVersion: []const u8,
+    libVersion: []const u8,
+    coasttyVersion: []const u8,
+) !Config {
     // Setup our standard Zig target and optimize options, i.e.
     // `-Doptimize` and `-Dtarget`.
     const optimize = b.standardOptimizeOption(.{});
@@ -245,6 +251,24 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
             "If not specified, git will be used. This must be a semantic version.",
     );
 
+    const coastty_version_string = b.option(
+        []const u8,
+        "coastty-version",
+        "Coastty's version for a release build. " ++
+            "If not specified, the VERSION file's version with a -dev suffix is used.",
+    );
+
+    const coastty_file_version = try std.SemanticVersion.parse(coasttyVersion);
+    config.coastty_version = if (coastty_version_string) |v|
+        try std.SemanticVersion.parse(v)
+    else
+        .{
+            .major = coastty_file_version.major,
+            .minor = coastty_file_version.minor,
+            .patch = coastty_file_version.patch,
+            .pre = "dev",
+        };
+
     config.version = if (version_string) |v|
         // If an explicit version is given, we always use it.
         try std.SemanticVersion.parse(v)
@@ -276,14 +300,15 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         if (vsn.tag) |tag| {
             // Tip releases behave just like any other pre-release so we skip.
             if (!std.mem.eql(u8, tag, "tip")) {
+                // Release tags name coastty's version, not Ghostty's.
                 const expected = b.fmt("v{d}.{d}.{d}", .{
-                    app_version.major,
-                    app_version.minor,
-                    app_version.patch,
+                    coastty_file_version.major,
+                    coastty_file_version.minor,
+                    coastty_file_version.patch,
                 });
 
                 if (!std.mem.eql(u8, tag, expected)) {
-                    @panic("tagged releases must be in vX.Y.Z format matching build.zig");
+                    @panic("tagged releases must be in vX.Y.Z format matching VERSION");
                 }
 
                 break :version .{
@@ -623,6 +648,12 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
         &app_version_buf,
         "{f}",
         .{self.version},
+    ));
+    var coastty_version_buf: [1024]u8 = undefined;
+    step.addOption([:0]const u8, "coastty_version_string", try std.fmt.bufPrintZ(
+        &coastty_version_buf,
+        "{f}",
+        .{self.coastty_version},
     ));
     var lib_version_buf: [1024]u8 = undefined;
     step.addOption(std.SemanticVersion, "lib_version", self.lib_version);

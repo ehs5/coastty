@@ -21,24 +21,24 @@ pub fn build(b: *std.Build) !void {
     // want to know what options are available, you can run `--help` or
     // you can read `src/build/Config.zig`.
 
-    // If we have a VERSION file (present in source tarballs) then we
-    // use that as the version source of truth. Otherwise we fall back
-    // to what is in the build.zig.zon.
-    const file_version: ?[]const u8 = if (b.build_root.handle.readFileAlloc(
-        b.graph.io,
-        "VERSION",
-        b.allocator,
-        .limited(128),
-    )) |content| std.mem.trim(
+    // VERSION holds coastty's own version.
+    // build.zig.zon's version stays Ghostty's, which programs in a pane see through TERM_PROGRAM_VERSION and XTVERSION to detect Ghostty features.
+    const coastty_version: []const u8 = std.mem.trim(
         u8,
-        content,
+        try b.build_root.handle.readFileAlloc(
+            b.graph.io,
+            "VERSION",
+            b.allocator,
+            .limited(128),
+        ),
         &std.ascii.whitespace,
-    ) else |_| null;
+    );
 
     const config = try buildpkg.Config.init(
         b,
-        file_version orelse app_zon_version,
+        app_zon_version,
         lib_version,
+        coastty_version,
     );
     const test_filters = b.option(
         [][]const u8,
