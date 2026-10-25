@@ -6,8 +6,9 @@ Decisions that are hard to reverse live in `docs/adr/`.
 
 ## The pieces
 
-- **coastty** - a macOS terminal forked from Ghostty. Ghostty plus a sidebar and
-  real session persistence; everything else should look and behave like Ghostty.
+- **coastty** - a macOS terminal forked from Ghostty. Ghostty plus agent
+  detection, Spaces and real session persistence; everything else should look and
+  behave like Ghostty.
 - **coastty-host** (the **daemon**) - a headless process, one per user, that owns
   every pane's pty and terminal state and outlives the GUI. It is the single
   source of truth for the model (ADR-0001). Reached over a Unix socket speaking

@@ -4,7 +4,7 @@ cask "coastty" do
 
   url "https://github.com/ehs5/coastty/releases/download/v#{version}/Coastty.dmg"
   name "Coastty"
-  desc "Terminal emulator with a sidebar and sessions that outlive the app"
+  desc "Terminal emulator with agent detection, Spaces and sessions that outlive the app"
   homepage "https://github.com/ehs5/coastty"
 
   depends_on macos: :ventura
